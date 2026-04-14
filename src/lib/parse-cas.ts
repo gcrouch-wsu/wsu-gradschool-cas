@@ -41,7 +41,7 @@ function readSheet(
   return rows.map(normalizeRow);
 }
 
-function cleanProgramId(pid: string): string {
+export function cleanProgramId(pid: string): string {
   return pid.trim();
 }
 

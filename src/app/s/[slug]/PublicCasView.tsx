@@ -3,6 +3,11 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  applicationWindowCardTitle,
+  augmentDetailRowsWithApplicationWindow,
+  prependApplicationWindowColumn,
+} from "@/lib/application-window-label";
+import {
   filterKeysByVisibleData,
   getRecordValueCi,
   unionRowKeysWithData,
@@ -253,17 +258,6 @@ function termSettingMap(settings: TermFieldSetting[]): Map<string, TermFieldSett
   return new Map(settings.map((s) => [s.key, s]));
 }
 
-function applicationWindowHeading(o: CasOffering, settings: TermFieldSetting[]): string | null {
-  const partMap = new Map(o.termParts.map((p) => [p.key, p.value]));
-  const segs: string[] = [];
-  for (const s of settings) {
-    if (!s.show_in_heading) continue;
-    const v = partMap.get(s.key)?.trim();
-    if (v) segs.push(v);
-  }
-  return segs.length > 0 ? segs.join(" · ") : null;
-}
-
 function visibleTermBullets(o: CasOffering, settings: TermFieldSetting[]) {
   const map = termSettingMap(settings);
   return o.termParts
@@ -293,6 +287,42 @@ function ProgramDetail({
   answerColumns: string[];
   documentColumns: string[];
 }) {
+  const questionsWithWindow = useMemo(
+    () =>
+      augmentDetailRowsWithApplicationWindow(
+        group.questions,
+        group.offerings,
+        termFieldSettings
+      ),
+    [group.questions, group.offerings, termFieldSettings]
+  );
+  const answersWithWindow = useMemo(
+    () =>
+      augmentDetailRowsWithApplicationWindow(group.answers, group.offerings, termFieldSettings),
+    [group.answers, group.offerings, termFieldSettings]
+  );
+  const documentsWithWindow = useMemo(
+    () =>
+      augmentDetailRowsWithApplicationWindow(
+        group.documents,
+        group.offerings,
+        termFieldSettings
+      ),
+    [group.documents, group.offerings, termFieldSettings]
+  );
+  const questionColumnsWithWindow = useMemo(
+    () => prependApplicationWindowColumn(questionColumns),
+    [questionColumns]
+  );
+  const answerColumnsWithWindow = useMemo(
+    () => prependApplicationWindowColumn(answerColumns),
+    [answerColumns]
+  );
+  const documentColumnsWithWindow = useMemo(
+    () => prependApplicationWindowColumn(documentColumns),
+    [documentColumns]
+  );
+
   return (
     <article className="space-y-10 rounded-xl border border-wsu-gray/10 bg-white p-6 shadow-sm">
       <div>
@@ -322,9 +352,8 @@ function ProgramDetail({
           {sectionTitle("Application windows")}
           <ul className="space-y-3 text-sm text-wsu-gray-dark">
             {group.offerings.map((o) => {
-              const heading = applicationWindowHeading(o, termFieldSettings);
               const bullets = visibleTermBullets(o, termFieldSettings);
-              const titleLine = heading ?? o.termLine;
+              const titleLine = applicationWindowCardTitle(o, termFieldSettings);
               return (
                 <li
                   key={o.programId}
@@ -375,7 +404,7 @@ function ProgramDetail({
       <section className="space-y-3">
         {sectionTitle("Program questions")}
         {group.questions.length ? (
-          <TableFromRecords rows={group.questions} columns={questionColumns} />
+          <TableFromRecords rows={questionsWithWindow} columns={questionColumnsWithWindow} />
         ) : (
           <p className="text-sm text-wsu-gray">None in export.</p>
         )}
@@ -384,7 +413,7 @@ function ProgramDetail({
       <section className="space-y-3">
         {sectionTitle("Answers")}
         {group.answers.length ? (
-          <TableFromRecords rows={group.answers} columns={answerColumns} />
+          <TableFromRecords rows={answersWithWindow} columns={answerColumnsWithWindow} />
         ) : (
           <p className="text-sm text-wsu-gray">None in export.</p>
         )}
@@ -393,7 +422,7 @@ function ProgramDetail({
       <section className="space-y-3">
         {sectionTitle("Documents")}
         {group.documents.length ? (
-          <TableFromRecords rows={group.documents} columns={documentColumns} />
+          <TableFromRecords rows={documentsWithWindow} columns={documentColumnsWithWindow} />
         ) : (
           <p className="text-sm text-wsu-gray">None in export.</p>
         )}

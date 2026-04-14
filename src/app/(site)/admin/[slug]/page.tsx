@@ -555,6 +555,18 @@ export default function AdminPublicationPage() {
               open its admin page and import the same JSON to reapply your layout — column keys that
               do not exist in the new file are dropped automatically.
             </p>
+            <p className="mt-2 text-sm text-wsu-gray">
+              <strong className="text-wsu-gray-dark">Where is the JSON?</strong> The app does not
+              keep a copy on the server. Use <strong className="text-wsu-gray-dark">Download
+              settings JSON</strong> first — your browser saves a file (usually{" "}
+              <code className="rounded bg-wsu-cream px-1 font-mono text-xs">
+                cas-publication-settings-… .json
+              </code>{" "}
+              in your <strong className="text-wsu-gray-dark">Downloads</strong> folder, or wherever
+              you choose in the save dialog). <strong className="text-wsu-gray-dark">Import
+              settings JSON</strong> then asks you to pick that file from your computer; there is
+              no URL or server path to type in.
+            </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
                 type="button"
@@ -812,6 +824,12 @@ export default function AdminPublicationPage() {
               an application window (for example Start Term, then Start Year — order follows this
               list). “In bullets” controls the detailed list under that line. You can relabel any
               row (for example “CAS import” instead of “Open Date”).
+            </p>
+            <p className="mt-2 text-sm text-wsu-gray">
+              The same “In title” text is repeated as the first column,{" "}
+              <strong className="text-wsu-gray-dark">Application window</strong>, on the public
+              Program questions, Answers, and Documents tables so each row is tied to the correct
+              Fall vs Spring (etc.) offering when a program has more than one CAS Program ID.
             </p>
             <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-wsu-gray/15 bg-wsu-cream/60 px-4 py-3">
               <input
