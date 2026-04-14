@@ -27,6 +27,16 @@ export async function POST(request: Request) {
   const deny = assertAdmin(request);
   if (deny) return deny;
 
+  if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+    return NextResponse.json(
+      {
+        error:
+          "BLOB_READ_WRITE_TOKEN is not set. In Vercel: open this project → Storage → create or connect a Blob store so the token is added, then redeploy.",
+      },
+      { status: 500 }
+    );
+  }
+
   const form = await request.formData();
   const file = form.get("file");
   const titleRaw = form.get("title");
@@ -59,7 +69,7 @@ export async function POST(request: Request) {
   try {
     await createPublication({ slug, title, data });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Database error";
+    const msg = e instanceof Error ? e.message : "Storage error";
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 

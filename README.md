@@ -1,60 +1,89 @@
 # CAS program viewer
 
-Next.js app for publishing **CAS Excel exports** (`.xlsx`) to a **read-only public page** with program search, a default program, and admin-controlled **summary columns**. Intended for data that may be fully public (no per-viewer login).
+Next.js app for publishing **CAS Excel exports** (`.xlsx`) to a **read-only public page** with program search, a default program, and admin-controlled **summary columns**. Data is stored in **Vercel Blob only** (no database).
 
 Remote repo: [github.com/gcrouch-wsu/CAS](https://github.com/gcrouch-wsu/CAS).
 
-> **Note:** The local folder created by `create-next-app` is `cas` (npm package naming). Clone the GitHub repo as `CAS` or any name you prefer; point Vercel at that directory.
+> Local folder name is `cas` (npm naming). Your GitHub repo can stay `CAS`.
 
-## Requirements
+## What you need from Vercel
 
-- Node 20+
-- Postgres database
-- Environment variables (see `.env.example`)
+| Variable | How you get it |
+|----------|----------------|
+| **`BLOB_READ_WRITE_TOKEN`** | Create a **Blob** store and **link it to this project**. Vercel injects this variable automatically (check **Project → Settings → Environment Variables**). |
+| **`ADMIN_SECRET`** | You create it: a long random string. Add it manually under **Environment Variables** for Production (and Preview if you want). |
 
-## Database
+You do **not** need `DATABASE_URL` or Supabase for this app.
 
-Run the migration SQL against your database (once):
+---
 
-```bash
-psql "$DATABASE_URL" -f supabase/migrations/001_cas_publications.sql
-```
+## Recommended order (first time on Vercel)
 
-Or paste the file contents into the SQL editor in Neon / Supabase / Vercel Postgres.
+1. **Push this repo to GitHub** (if it is not already).
+2. In **[vercel.com](https://vercel.com)** → **Add New… → Project** → **Import** the `CAS` repo.
+3. **Before or after the first deploy**, open the **project** (not the team root):
+   - Go to **Storage** (or **Create** → **Blob**).
+   - **Create** a Blob store (any name, e.g. `cas-blob`) and **connect** it to **this** project.
+4. Confirm **Settings → Environment Variables** includes **`BLOB_READ_WRITE_TOKEN`** for **Production**.
+5. Add **`ADMIN_SECRET`** yourself (same Environment Variables screen). Save.
+6. **Deployments → … on the latest deployment → Redeploy** so a build runs with both variables set.
+
+**Answer to “Blob or project first?”**  
+Either works, but the path that causes the least confusion is: **import the GitHub project first** → then **attach Blob to that project** so the token appears on the right app → then add **`ADMIN_SECRET`** → redeploy.
+
+---
 
 ## Local development
 
 ```bash
-cp .env.example .env.local
-# edit DATABASE_URL and ADMIN_SECRET
-
 npm install
-npm run dev
 ```
 
+1. Link and pull env from Vercel (easiest):
+
+   ```bash
+   npx vercel link
+   npx vercel env pull .env.local
+   ```
+
+2. Or create `.env.local` by hand:
+
+   ```env
+   BLOB_READ_WRITE_TOKEN=...   # from Vercel project settings
+   ADMIN_SECRET=...            # same value you use in production
+   ```
+
+3. Run:
+
+   ```bash
+   npm run dev
+   ```
+
 - Home: [http://localhost:3000](http://localhost:3000)
-- Admin upload: [http://localhost:3000/admin](http://localhost:3000/admin)
-- Public view: `http://localhost:3000/s/<slug>` (slug returned after upload)
+- Admin: [http://localhost:3000/admin](http://localhost:3000/admin)
+- Public: `/s/<slug>` after an upload
 
-## Vercel
-
-1. Create a Postgres database (or use Neon) and run `001_cas_publications.sql`.
-2. Create a Vercel project from this repo / directory.
-3. Set `DATABASE_URL` and `ADMIN_SECRET` in Project → Settings → Environment Variables.
-4. Deploy.
+---
 
 ## How it works
 
-1. **Admin** posts a CAS `.xlsx` with `Authorization: Bearer <ADMIN_SECRET>` (the web UI at `/admin` does this).
-2. The server parses **Program Attributes**, **Recommendations**, **Questions**, **Answers**, **Documents**, **Org Questions**, **Org Answers** (missing sheets are OK).
-3. Rows are **grouped** by a stable key (`WebAdMIT Label`, else `ProgramCode` / `Program Code`, else `Unique ID`, else organization + program + cycle). Within a group, **shared** fields become the summary; **term lines** list each application window (term + open / deadlines).
-4. You choose **which summary columns** appear on the public page; questions / documents / answers / recommendations still show in full for the selected program group.
-5. **Public** page `/s/[slug]` loads data from Postgres (no auth). `robots` is set to **noindex** to avoid search indexing of unlisted links (adjust if you want discoverability).
+1. Admin uploads a CAS `.xlsx` with `Authorization: Bearer <ADMIN_SECRET>`.
+2. The server parses sheets and writes **one private JSON object** per publication to Blob at  
+   `cas-publications/<slug>.json`.
+3. The public page and `GET /api/public/[slug]` read that object using **`BLOB_READ_WRITE_TOKEN`** on the server only.
+4. Admin can **PATCH** column visibility and default program; the JSON file is overwritten.
 
-## Security note
+`robots` on `/s/[slug]` is **noindex** by default.
 
-`ADMIN_SECRET` gates uploads and column changes. Anyone with the secret can publish. Anyone with a public URL can read that publication. Rotate the secret if it leaks.
+---
 
-## CAS parser dependency
+## Security
 
-The app uses the [`xlsx`](https://www.npmjs.com/package/xlsx) package for parsing. Only **trusted** CAS files should be uploaded (admin-only). Review `npm audit` if you plan to accept untrusted spreadsheets.
+- **`ADMIN_SECRET`** protects uploads and admin settings.
+- **`BLOB_READ_WRITE_TOKEN`** must stay server-side (never commit to git). Public users never see it.
+- Publication URLs are unlisted slugs; treat links as capability URLs.
+
+## CAS parser
+
+Uses the [`xlsx`](https://www.npmjs.com/package/xlsx) package. Only **trusted** CAS files should be uploaded (admin-only).
+

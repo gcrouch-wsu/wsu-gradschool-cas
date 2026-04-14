@@ -32,6 +32,12 @@ export async function GET(
 ) {
   const deny = assertAdmin(request);
   if (deny) return deny;
+  if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+    return NextResponse.json(
+      { error: "BLOB_READ_WRITE_TOKEN is not set. Link a Blob store to this project." },
+      { status: 500 }
+    );
+  }
   const { slug } = await ctx.params;
   const row = await getPublicationBySlug(slug);
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -55,6 +61,12 @@ export async function PATCH(
 ) {
   const deny = assertAdmin(request);
   if (deny) return deny;
+  if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+    return NextResponse.json(
+      { error: "BLOB_READ_WRITE_TOKEN is not set. Link a Blob store to this project." },
+      { status: 500 }
+    );
+  }
   const { slug } = await ctx.params;
   let body: unknown;
   try {

@@ -1,4 +1,4 @@
-import { query } from "./db";
+import { get, put } from "@vercel/blob";
 import type {
   CasPublicationData,
   PublicPublicationPayload,
@@ -6,7 +6,19 @@ import type {
 } from "./types";
 import { defaultVisibleColumns, pickVisibleShared } from "./parse-cas";
 
-type StoredGroup = CasPublicationData["groups"][number];
+const BLOB_PREFIX = "cas-publications";
+
+/** Stored as one JSON file per publication in Vercel Blob. */
+export type StoredPublicationBlob = {
+  version: 1;
+  slug: string;
+  title: string;
+  visible_columns: string[];
+  default_group_key: string;
+  data: CasPublicationData;
+  created_at: string;
+  updated_at: string;
+};
 
 export type PublicationRow = {
   id: string;
@@ -18,6 +30,36 @@ export type PublicationRow = {
   created_at: string;
   updated_at: string;
 };
+
+type StoredGroup = CasPublicationData["groups"][number];
+
+function requireBlobToken(): string {
+  const t = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!t) {
+    throw new Error("BLOB_READ_WRITE_TOKEN is not set.");
+  }
+  return t;
+}
+
+function publicationPathname(slug: string): string {
+  if (!/^[a-z0-9]{8,32}$/.test(slug)) {
+    throw new Error("Invalid slug");
+  }
+  return `${BLOB_PREFIX}/${slug}.json`;
+}
+
+function blobToRow(parsed: StoredPublicationBlob): PublicationRow {
+  return {
+    id: parsed.slug,
+    slug: parsed.slug,
+    title: parsed.title,
+    visible_columns: parsed.visible_columns,
+    default_group_key: parsed.default_group_key,
+    data: parsed.data,
+    created_at: parsed.created_at,
+    updated_at: parsed.updated_at,
+  };
+}
 
 function mapToPublicGroup(
   g: StoredGroup,
@@ -53,12 +95,32 @@ export function toPublicPayload(row: PublicationRow): PublicPublicationPayload {
 export async function getPublicationBySlug(
   slug: string
 ): Promise<PublicationRow | null> {
-  const { rows } = await query<PublicationRow>(
-    `SELECT id, slug, title, visible_columns, default_group_key, data, created_at, updated_at
-     FROM cas_publications WHERE slug = $1`,
-    [slug]
-  );
-  return rows[0] ?? null;
+  if (!/^[a-z0-9]{8,32}$/.test(slug)) {
+    return null;
+  }
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!token) {
+    return null;
+  }
+  const pathname = publicationPathname(slug);
+  try {
+    const res = await get(pathname, {
+      access: "private",
+      token,
+      useCache: false,
+    });
+    if (!res?.stream) {
+      return null;
+    }
+    const text = await new Response(res.stream as ReadableStream).text();
+    const parsed = JSON.parse(text) as StoredPublicationBlob;
+    if (parsed.version !== 1 || parsed.slug !== slug) {
+      return null;
+    }
+    return blobToRow(parsed);
+  } catch {
+    return null;
+  }
 }
 
 export async function createPublication(input: {
@@ -66,19 +128,26 @@ export async function createPublication(input: {
   title: string;
   data: CasPublicationData;
 }): Promise<void> {
+  const token = requireBlobToken();
   const vis = defaultVisibleColumns(input.data.summaryColumnOptions);
   const defaultGroupKey = input.data.groups[0]?.groupKey ?? "";
-  await query(
-    `INSERT INTO cas_publications (slug, title, visible_columns, default_group_key, data)
-     VALUES ($1, $2, $3::text[], $4, $5::jsonb)`,
-    [
-      input.slug,
-      input.title,
-      vis,
-      defaultGroupKey,
-      JSON.stringify(input.data),
-    ]
-  );
+  const now = new Date().toISOString();
+  const body: StoredPublicationBlob = {
+    version: 1,
+    slug: input.slug,
+    title: input.title,
+    visible_columns: vis,
+    default_group_key: defaultGroupKey,
+    data: input.data,
+    created_at: now,
+    updated_at: now,
+  };
+  await put(publicationPathname(input.slug), JSON.stringify(body), {
+    access: "private",
+    token,
+    addRandomSuffix: false,
+    contentType: "application/json",
+  });
 }
 
 export async function updatePublication(
@@ -108,14 +177,22 @@ export async function updatePublication(
   if (patch.visibleColumnKeys) {
     visible = patch.visibleColumnKeys.filter((k) => opts.has(k));
   }
-  await query(
-    `UPDATE cas_publications
-     SET title = $2,
-         visible_columns = $3::text[],
-         default_group_key = $4,
-         updated_at = now()
-     WHERE slug = $1`,
-    [slug, title, visible, defaultGroupKey]
-  );
+  const token = requireBlobToken();
+  const body: StoredPublicationBlob = {
+    version: 1,
+    slug: existing.slug,
+    title,
+    visible_columns: visible,
+    default_group_key: defaultGroupKey,
+    data: existing.data,
+    created_at: existing.created_at,
+    updated_at: new Date().toISOString(),
+  };
+  await put(publicationPathname(slug), JSON.stringify(body), {
+    access: "private",
+    token,
+    addRandomSuffix: false,
+    contentType: "application/json",
+  });
   return getPublicationBySlug(slug);
 }
