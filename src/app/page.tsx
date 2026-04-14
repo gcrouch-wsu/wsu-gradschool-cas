@@ -21,6 +21,12 @@ export default function Home() {
           >
             Admin sign in
           </Link>
+          <Link
+            href="/admin"
+            className="text-center text-sm font-medium text-wsu-crimson underline decoration-wsu-crimson/30 hover:decoration-wsu-crimson"
+          >
+            Already signed in? Continue to upload →
+          </Link>
           <p className="text-center text-xs text-wsu-gray">
             After publishing, share the public link{" "}
             <code className="rounded bg-wsu-cream px-1.5 py-0.5 font-mono text-wsu-gray-dark">
