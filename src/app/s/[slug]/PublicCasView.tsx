@@ -2,6 +2,11 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import {
+  filterKeysByVisibleData,
+  getRecordValueCi,
+  unionRowKeysWithData,
+} from "@/lib/record-key";
 import type {
   CasOffering,
   PublicProgramGroup,
@@ -406,13 +411,21 @@ function TableFromRecords({
 }) {
   const keys = useMemo(() => {
     if (columns && columns.length > 0) {
-      return columns;
+      return filterKeysByVisibleData(rows, columns);
     }
-    const s = new Set<string>();
-    for (const r of rows) for (const k of Object.keys(r)) s.add(k);
-    return [...s];
+    return unionRowKeysWithData(rows);
   }, [rows, columns]);
-  if (keys.length === 0) return null;
+
+  if (rows.length === 0) return null;
+  if (keys.length === 0) {
+    return (
+      <p className="mt-2 text-sm text-wsu-gray">
+        {columns && columns.length > 0
+          ? "None of the selected columns contain values for these rows."
+          : "No non-empty columns in these rows."}
+      </p>
+    );
+  }
   return (
     <div className="mt-3 overflow-x-auto rounded-lg border border-wsu-gray/15">
       <table className="min-w-full divide-y divide-wsu-gray/10 text-left text-sm">
@@ -430,7 +443,7 @@ function TableFromRecords({
             <tr key={i} className="hover:bg-wsu-cream/40">
               {keys.map((k) => (
                 <td key={k} className="max-w-xs whitespace-pre-wrap px-3 py-2.5 text-wsu-gray-dark">
-                  {r[k] ?? ""}
+                  {getRecordValueCi(r, k) ?? ""}
                 </td>
               ))}
             </tr>

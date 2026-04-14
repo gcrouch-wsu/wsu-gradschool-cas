@@ -6,6 +6,7 @@ import type {
   TermFieldSetting,
 } from "./types";
 import { DEFAULT_PROGRAM_NAME_STRIP_SUFFIXES } from "./program-display";
+import { getRecordValueCi } from "./record-key";
 import { REDUNDANT_DETAIL_COLUMN_KEYS } from "./types";
 
 function cellToString(v: unknown): string {
@@ -594,7 +595,8 @@ export function filterRecordRows(
   return rows.map((r) => {
     const o: Record<string, string> = {};
     for (const k of visibleKeys) {
-      if (k in r) o[k] = r[k];
+      const v = getRecordValueCi(r, k);
+      if (v !== undefined) o[k] = v;
     }
     return o;
   });

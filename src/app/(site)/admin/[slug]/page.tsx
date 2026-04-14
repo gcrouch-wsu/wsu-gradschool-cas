@@ -3,7 +3,11 @@
 import { upload } from "@vercel/blob/client";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PROGRAM_NAME_STRIP_COMMA_AND_REST } from "@/lib/program-display";
+import {
+  PROGRAM_NAME_STRIP_COMMA_AND_REST,
+  PROGRAM_NAME_STRIP_COMMA_AND_REST_ALIAS,
+  PROGRAM_NAME_STRIP_SPACED_DASH_AND_REST,
+} from "@/lib/program-display";
 import type { TermFieldSetting } from "@/lib/types";
 
 type ConfigResponse = {
@@ -92,6 +96,8 @@ export default function AdminPublicationPage() {
   const [mergeFile, setMergeFile] = useState<File | null>(null);
   const [mergeBusy, setMergeBusy] = useState(false);
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
+  const [settingsImportBusy, setSettingsImportBusy] = useState(false);
+  const [settingsImportMessage, setSettingsImportMessage] = useState<string | null>(null);
 
   const applyConfig = useCallback((c: ConfigResponse) => {
     setSaved(c);
@@ -335,6 +341,86 @@ export default function AdminPublicationPage() {
     }
   }
 
+  async function downloadSettingsExport() {
+    if (!slug) return;
+    setError(null);
+    setSettingsImportMessage(null);
+    const res = await fetch(`/api/admin/publications/${slug}/settings-export`, {
+      credentials: "include",
+    });
+    if (res.status === 401) {
+      router.push(`/admin/login?next=${encodeURIComponent(`/admin/${slug}`)}`);
+      return;
+    }
+    if (!res.ok) {
+      const t = await res.text();
+      setError(t.slice(0, 400));
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cas-publication-settings-${slug}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setSaveMessage("Downloaded settings JSON.");
+    window.setTimeout(() => setSaveMessage(null), 5000);
+  }
+
+  async function onSettingsImportChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !slug) return;
+    setSettingsImportBusy(true);
+    setError(null);
+    setSettingsImportMessage(null);
+    try {
+      const text = await file.text();
+      let json: unknown;
+      try {
+        json = JSON.parse(text) as unknown;
+      } catch {
+        setError("That file is not valid JSON.");
+        return;
+      }
+      const res = await fetch(`/api/admin/publications/${slug}/settings-import`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(json),
+      });
+      if (res.status === 401) {
+        router.push(`/admin/login?next=${encodeURIComponent(`/admin/${slug}`)}`);
+        return;
+      }
+      const raw = await res.text();
+      let parsed: { error?: string; details?: unknown; droppedDefaultGroupKey?: boolean } = {};
+      try {
+        if (raw.trim()) parsed = JSON.parse(raw) as typeof parsed;
+      } catch {
+        setError(`Import failed (HTTP ${res.status}). ${raw.slice(0, 400)}`);
+        return;
+      }
+      if (!res.ok) {
+        setError(parsed.error ?? "Import failed");
+        return;
+      }
+      await loadConfig();
+      setSettingsImportMessage(
+        parsed.droppedDefaultGroupKey
+          ? "Imported settings. The previous default program was not in this workbook, so the default program was left as-is."
+          : "Imported settings from JSON."
+      );
+    } catch {
+      setError("Could not read that file.");
+    } finally {
+      setSettingsImportBusy(false);
+    }
+  }
+
   function discard() {
     if (!saved) return;
     setDraftColumns([...saved.visibleColumnKeys]);
@@ -450,9 +536,47 @@ export default function AdminPublicationPage() {
           {saveMessage}
         </p>
       )}
+      {settingsImportMessage && (
+        <p className="mt-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          {settingsImportMessage}
+        </p>
+      )}
 
       {saved && (
         <div className="mt-8 space-y-10">
+          <section className="rounded-xl border border-wsu-gray/15 bg-white p-5 shadow-sm">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-wsu-gray">
+              Settings JSON (backup &amp; restore)
+            </h2>
+            <p className="mt-2 text-sm text-wsu-gray">
+              Export everything below (columns, term lines, public header/hero, program-name
+              suffixes, publication title) except the CAS workbook. After a{" "}
+              <strong className="text-wsu-gray-dark">new upload</strong> creates a new publication,
+              open its admin page and import the same JSON to reapply your layout — column keys that
+              do not exist in the new file are dropped automatically.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={settingsImportBusy}
+                onClick={() => void downloadSettingsExport()}
+                className="rounded-lg border border-wsu-gray/25 bg-white px-4 py-2.5 text-sm font-semibold text-wsu-gray-dark shadow-sm hover:bg-wsu-cream disabled:opacity-50"
+              >
+                Download settings JSON
+              </button>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-wsu-crimson/30 bg-wsu-crimson/10 px-4 py-2.5 text-sm font-semibold text-wsu-crimson hover:bg-wsu-crimson/20 disabled:opacity-50">
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  disabled={settingsImportBusy}
+                  className="sr-only"
+                  onChange={(ev) => void onSettingsImportChange(ev)}
+                />
+                {settingsImportBusy ? "Importing…" : "Import settings JSON"}
+              </label>
+            </div>
+          </section>
+
           <section className="rounded-xl border border-wsu-gray/15 bg-white p-5 shadow-sm">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-wsu-gray">
               Source file(s)
@@ -577,10 +701,15 @@ export default function AdminPublicationPage() {
                 Longer lines are tried first each pass (e.g.{" "}
                 <code className="font-mono text-xs">, Online (Spring)</code> before{" "}
                 <code className="font-mono text-xs">, Online</code>). Use{" "}
-                <code className="font-mono text-xs">{PROGRAM_NAME_STRIP_COMMA_AND_REST}</code> as
-                its own line to drop the <strong className="text-wsu-gray-dark">first comma and
-                everything after it</strong> (covers any trailing campus/modality text after that
-                comma).
+                <code className="font-mono text-xs">{PROGRAM_NAME_STRIP_COMMA_AND_REST}</code> or{" "}
+                <code className="font-mono text-xs">{PROGRAM_NAME_STRIP_COMMA_AND_REST_ALIAS}</code>{" "}
+                as its own line to drop the <strong className="text-wsu-gray-dark">first comma and
+                everything after it</strong>. Use{" "}
+                <code className="font-mono text-xs">{PROGRAM_NAME_STRIP_SPACED_DASH_AND_REST}</code>{" "}
+                to cut at the first spaced hyphen or en dash (e.g.{" "}
+                <code className="font-mono text-xs"> - </code> or{" "}
+                <code className="font-mono text-xs"> – </code>) when campus/modality is separated
+                that way instead of with a comma.
                 <textarea
                   value={draftProgramStripText}
                   disabled={saving}
