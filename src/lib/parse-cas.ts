@@ -598,6 +598,12 @@ export function filterRecordRows(
       const v = getRecordValueCi(r, k);
       if (v !== undefined) o[k] = v;
     }
+    /** Needed to tie each row to an offering / term even when “Program ID” is hidden in admin. */
+    const hasPid = Object.keys(o).some((k) => k.trim().toLowerCase() === "program id");
+    if (!hasPid) {
+      const pid = getRecordValueCi(r, "Program ID");
+      if (pid !== undefined) o["Program ID"] = pid;
+    }
     return o;
   });
 }

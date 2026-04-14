@@ -1,5 +1,6 @@
 import type { CasOffering, TermFieldSetting } from "./types";
 import { cleanProgramId } from "./parse-cas";
+import { getRecordValueCi } from "./record-key";
 
 /** Prepended on Questions / Answers / Documents so each row shows Fall vs Spring (etc.) first. */
 export const APPLICATION_WINDOW_COLUMN = "Application window";
@@ -98,6 +99,16 @@ function stripConflictingRowKeys(r: Record<string, string>): Record<string, stri
   return out;
 }
 
+/** When Program ID is missing or unmatched, use the row’s own Start Term / Year (CAS detail sheets). */
+function labelFromRowStartFields(base: Record<string, string>): string | null {
+  const st = getRecordValueCi(base, "Start Term")?.trim();
+  const sy = getRecordValueCi(base, "Start Year")?.trim();
+  if (st && sy) return `${st} · ${sy}`;
+  if (st) return st;
+  if (sy) return sy;
+  return null;
+}
+
 export function augmentDetailRowsWithApplicationWindow(
   rows: Record<string, string>[],
   offerings: CasOffering[],
@@ -109,9 +120,11 @@ export function augmentDetailRowsWithApplicationWindow(
   }
   return rows.map((r) => {
     const base = stripConflictingRowKeys(r);
-    const pid = cleanProgramId(base["Program ID"] || "");
+    const pid = programIdFromRow(base);
     const o = pid ? byPid.get(pid) : undefined;
-    const label = o ? detailTableApplicationWindowLabel(o, settings) : "—";
+    const label = o
+      ? detailTableApplicationWindowLabel(o, settings)
+      : labelFromRowStartFields(base) ?? "—";
     return { [APPLICATION_WINDOW_COLUMN]: label, ...base };
   });
 }
@@ -134,6 +147,8 @@ function detailRowContentSignature(row: Record<string, string>): string {
       const kl = k.trim().toLowerCase();
       if (kl === "program id") return false;
       if (kl === APPLICATION_WINDOW_COLUMN.toLowerCase()) return false;
+      /** Same prompt across Fall/Spring should merge; term is carried in Application window. */
+      if (kl === "start term" || kl === "start year") return false;
       return true;
     })
     .map(([k, v]) => [k, (v ?? "").trim()] as const)
