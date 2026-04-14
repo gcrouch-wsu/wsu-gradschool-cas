@@ -3,6 +3,7 @@ import type {
   CasOffering,
   CasProgramGroup,
   CasPublicationData,
+  RecommendationByOffering,
   TermFieldSetting,
 } from "./types";
 import { DEFAULT_PROGRAM_NAME_STRIP_SUFFIXES } from "./program-display";
@@ -234,20 +235,48 @@ function pickDisplayName(rows: Record<string, string>[]): string {
   );
 }
 
+/** Parse-time window label (no term_field_settings); matches public “Start Term · Start Year” when present. */
+function offeringWindowLabel(o: CasOffering): string {
+  const map = new Map(o.termParts.map((p) => [p.key.trim().toLowerCase(), (p.value || "").trim()]));
+  const st = map.get("start term");
+  const sy = map.get("start year");
+  if (st && sy) return `${st} · ${sy}`;
+  if (st) return st;
+  if (sy) return sy;
+  const line = (o.termLine || "").trim();
+  if (line) return line;
+  const pid = cleanProgramId(o.programId);
+  return pid ? `Program ID ${pid}` : "—";
+}
+
 function mergeRecommendationForGroup(
-  programIds: string[],
+  offerings: CasOffering[],
   recMap: Map<string, Record<string, string>>
-): { rec: Record<string, string> | null; note?: string } {
-  const payloads = programIds
-    .map((id) => recMap.get(id))
-    .filter((x): x is Record<string, string> => !!x && Object.values(x).some(Boolean));
+): {
+  rec: Record<string, string> | null;
+  note?: string;
+  recommendationRows?: RecommendationByOffering[];
+} {
+  const payloads: { id: string; rec: Record<string, string> }[] = [];
+  for (const o of offerings) {
+    const id = cleanProgramId(o.programId);
+    if (!id) continue;
+    const rec = recMap.get(id);
+    if (rec && Object.values(rec).some(Boolean)) payloads.push({ id, rec });
+  }
   if (payloads.length === 0) return { rec: null };
-  const canon = JSON.stringify(payloads[0]);
-  const allSame = payloads.every((p) => JSON.stringify(p) === canon);
-  if (allSame) return { rec: payloads[0] };
+  const canon = JSON.stringify(payloads[0].rec);
+  const allSame = payloads.every((p) => JSON.stringify(p.rec) === canon);
+  if (allSame) return { rec: payloads[0].rec };
+  const recommendationRows: RecommendationByOffering[] = payloads.map(({ id, rec }) => {
+    const offering = offerings.find((x) => cleanProgramId(x.programId) === id);
+    const windowLabel = offering ? offeringWindowLabel(offering) : id;
+    return { programId: id, windowLabel, values: { ...rec } };
+  });
   return {
-    rec: payloads[0],
-    note: "Recommendation settings differ between application windows in this group; showing one window’s values. Confirm in CAS.",
+    rec: payloads[0].rec,
+    note: "Recommendation settings differ by application window; each window is listed below.",
+    recommendationRows,
   };
 }
 
@@ -392,17 +421,79 @@ function dedupeOrgRows(rows: Record<string, string>[]): Record<string, string>[]
   return out;
 }
 
+function mergeRecommendationRows(
+  a?: RecommendationByOffering[],
+  b?: RecommendationByOffering[]
+): RecommendationByOffering[] | undefined {
+  if (!a?.length && !b?.length) return undefined;
+  const m = new Map<string, RecommendationByOffering>();
+  for (const r of a ?? []) m.set(r.programId, { ...r, values: { ...r.values } });
+  for (const r of b ?? []) m.set(r.programId, { ...r, values: { ...r.values } });
+  const arr = [...m.values()];
+  return arr.length ? arr : undefined;
+}
+
 function mergeGroupRecommendations(
   existing: CasProgramGroup,
   incoming: CasProgramGroup
-): { rec: Record<string, string> | null; note?: string } {
+): {
+  rec: Record<string, string> | null;
+  note?: string;
+  recommendationRows?: RecommendationByOffering[];
+} {
+  const mergedRows = mergeRecommendationRows(
+    existing.recommendationRows,
+    incoming.recommendationRows
+  );
+  if (mergedRows && mergedRows.length > 0) {
+    const uniqueValues = new Set(mergedRows.map((r) => JSON.stringify(r.values)));
+    if (uniqueValues.size <= 1) {
+      return {
+        rec: mergedRows[0].values,
+        note: existing.recommendationNote ?? incoming.recommendationNote,
+      };
+    }
+    return {
+      rec: mergedRows[0].values,
+      note: "Recommendation settings differ by application window or between merged CAS exports; each window is listed below.",
+      recommendationRows: mergedRows,
+    };
+  }
+
   const a = existing.recommendations;
   const b = incoming.recommendations;
   if (!a && !b) return { rec: null };
-  if (a && !b) return { rec: a, note: existing.recommendationNote };
-  if (!a && b) return { rec: b, note: incoming.recommendationNote };
+  if (a && !b) {
+    return {
+      rec: a,
+      note: existing.recommendationNote,
+      ...(existing.recommendationRows?.length
+        ? { recommendationRows: existing.recommendationRows }
+        : {}),
+    };
+  }
+  if (!a && b) {
+    return {
+      rec: b,
+      note: incoming.recommendationNote,
+      ...(incoming.recommendationRows?.length
+        ? { recommendationRows: incoming.recommendationRows }
+        : {}),
+    };
+  }
   const same = JSON.stringify(a) === JSON.stringify(b);
   if (same) {
+    const rows = mergeRecommendationRows(existing.recommendationRows, incoming.recommendationRows);
+    if (rows && rows.length > 0) {
+      const uniqueValues = new Set(rows.map((r) => JSON.stringify(r.values)));
+      if (uniqueValues.size > 1) {
+        return {
+          rec: a,
+          note: existing.recommendationNote ?? incoming.recommendationNote,
+          recommendationRows: rows,
+        };
+      }
+    }
     return {
       rec: a,
       note: existing.recommendationNote ?? incoming.recommendationNote,
@@ -451,6 +542,8 @@ export function mergePublicationData(
     const mergedRec = mergeGroupRecommendations(ex, g);
     ex.recommendations = mergedRec.rec;
     ex.recommendationNote = mergedRec.note;
+    if (mergedRec.recommendationRows?.length) ex.recommendationRows = mergedRec.recommendationRows;
+    else delete ex.recommendationRows;
   }
   const mergedGroups = [...map.values()].sort((x, y) =>
     x.displayName.localeCompare(y.displayName, undefined, { sensitivity: "base" })
@@ -514,7 +607,7 @@ function buildGroupsFromSheets(params: {
       aAccum.push(...rowsForProgram(answersAll, pid));
     }
 
-    const { rec, note } = mergeRecommendationForGroup(programIds, recMap);
+    const { rec, note, recommendationRows } = mergeRecommendationForGroup(offerings, recMap);
 
     groups.push({
       groupKey: groupKey(rows[0]),
@@ -523,6 +616,7 @@ function buildGroupsFromSheets(params: {
       offerings,
       recommendations: rec,
       recommendationNote: note,
+      recommendationRows,
       questions: dedupeQuestions(qAccum),
       documents: dedupeDocuments(dAccum),
       answers: dedupeAnswers(aAccum),

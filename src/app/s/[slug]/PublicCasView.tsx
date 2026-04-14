@@ -6,6 +6,7 @@ import {
   applicationWindowCardTitle,
   augmentDetailRowsWithApplicationWindow,
   collapseAugmentedDetailRowsByMatchingContent,
+  detailTableApplicationWindowLabel,
   prependApplicationWindowColumn,
 } from "@/lib/application-window-label";
 import { linkifyHeroSegment } from "@/lib/hero-linkify";
@@ -356,7 +357,43 @@ function ProgramDetail({
             {group.recommendationNote}
           </p>
         )}
-        {group.recommendations && Object.keys(group.recommendations).length > 0 ? (
+        {group.recommendationRows && group.recommendationRows.length > 0 ? (
+          <div className="space-y-4">
+            {group.recommendationRows.map((row) => {
+              const o = group.offerings.find(
+                (x) => x.programId.trim() === row.programId.trim()
+              );
+              const heading = o
+                ? detailTableApplicationWindowLabel(o, termFieldSettings)
+                : row.windowLabel;
+              return (
+                <div
+                  key={row.programId}
+                  className="rounded-lg border border-wsu-gray/10 bg-wsu-cream/25 px-3 py-3"
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-wsu-crimson">
+                    Application window
+                  </p>
+                  <p className="mt-0.5 text-sm font-semibold text-wsu-gray-dark">{heading}</p>
+                  {showProgramIdOnPublic ? (
+                    <p className="mt-1 text-xs text-wsu-gray">Program ID: {row.programId}</p>
+                  ) : null}
+                  <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {Object.entries(row.values).map(([k, v]) => (
+                      <div
+                        key={k}
+                        className="rounded-md border border-wsu-gray/10 bg-white px-3 py-2"
+                      >
+                        <dt className="text-xs font-medium text-wsu-gray">{k}</dt>
+                        <dd className="mt-1 text-sm text-wsu-gray-dark">{v || "—"}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              );
+            })}
+          </div>
+        ) : group.recommendations && Object.keys(group.recommendations).length > 0 ? (
           <dl className="grid gap-3 sm:grid-cols-2">
             {Object.entries(group.recommendations).map(([k, v]) => (
               <div key={k} className="rounded-lg border border-wsu-gray/10 px-3 py-2">

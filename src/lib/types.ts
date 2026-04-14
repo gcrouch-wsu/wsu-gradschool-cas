@@ -21,6 +21,14 @@ export interface CasOffering {
   termParts: { key: string; value: string }[];
 }
 
+/** Recommendation sheet values for one CAS Program ID, labeled for public display when terms differ. */
+export interface RecommendationByOffering {
+  programId: string;
+  /** Short label aligned with application window (e.g. Start Term · Start Year). */
+  windowLabel: string;
+  values: Record<string, string>;
+}
+
 export interface CasProgramGroup {
   groupKey: string;
   displayName: string;
@@ -28,6 +36,8 @@ export interface CasProgramGroup {
   offerings: CasOffering[];
   recommendations: Record<string, string> | null;
   recommendationNote?: string;
+  /** When set, `recommendations` is only a fallback; show each row’s `values` under its `windowLabel`. */
+  recommendationRows?: RecommendationByOffering[];
   questions: Record<string, string>[];
   documents: Record<string, string>[];
   answers: Record<string, string>[];
@@ -78,6 +88,7 @@ export interface PublicProgramGroup {
   offerings: CasOffering[];
   recommendations: Record<string, string> | null;
   recommendationNote?: string;
+  recommendationRows?: RecommendationByOffering[];
   questions: Record<string, string>[];
   documents: Record<string, string>[];
   answers: Record<string, string>[];

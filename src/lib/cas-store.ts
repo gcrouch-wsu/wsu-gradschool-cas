@@ -201,6 +201,7 @@ function mapToPublicGroup(
     offerings: g.offerings,
     recommendations: g.recommendations,
     recommendationNote: g.recommendationNote,
+    recommendationRows: g.recommendationRows,
     questions: filterRecordRows(g.questions, questionKeys),
     documents: filterRecordRows(g.documents, documentKeys),
     answers: filterRecordRows(g.answers, answerKeys),
