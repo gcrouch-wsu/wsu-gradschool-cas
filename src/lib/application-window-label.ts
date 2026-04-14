@@ -2,8 +2,39 @@ import type { CasOffering, TermFieldSetting } from "./types";
 import { cleanProgramId } from "./parse-cas";
 import { getRecordValueCi } from "./record-key";
 
+/**
+ * ## Detail tables (Program questions, Answers, Documents) — row merge policy
+ *
+ * **Parse time (parse-cas):** Rows are kept per CAS Program ID. Dedupe keys include Program ID so
+ * identical-looking Fall and Spring rows are not dropped before publish.
+ *
+ * **Public view (this file):** After adding the “Application window” column from Program
+ * Attributes (and Start Term on the row when needed), we merge rows when:
+ *
+ * - **Combine:** Every column except Program ID, Application window, Start Term, and Start Year
+ *   matches another row (after normalizing whitespace). That means the requirement text is the
+ *   same across application windows; only term / Program ID differed.
+ * - **Result:** One row with Application window set to combined terms (e.g. `Fall · 2027/Spring · 2028`
+ *   or season-only `Fall/Spring` in Start Term when seasons are clear). Program ID lists both CAS
+ *   IDs. Start Year is cleared when multiple programs were merged so a single year is not wrong.
+ *
+ * - **Keep separate:** If any compared column differs, rows stay separate so different requirements
+ *   are never collapsed together.
+ *
+ * **Not merged here:** Summary, recommendations, org questions/answers, or the Application windows
+ * card list (each offering stays its own card).
+ */
+
 /** Prepended on Questions / Answers / Documents so each row shows Fall vs Spring (etc.) first. */
 export const APPLICATION_WINDOW_COLUMN = "Application window";
+
+/** Normalize cell text so “identical” rows match despite minor whitespace differences. */
+function normalizeForDetailSignature(value: string): string {
+  return value
+    .trim()
+    .replace(/\r\n|\r|\n/g, " ")
+    .replace(/\s+/g, " ");
+}
 
 /** Start Term / Start Year from Program Attributes (case-insensitive keys on termParts). */
 export function startTermYearPrimary(o: CasOffering): string | null {
@@ -151,7 +182,7 @@ function detailRowContentSignature(row: Record<string, string>): string {
       if (kl === "start term" || kl === "start year") return false;
       return true;
     })
-    .map(([k, v]) => [k, (v ?? "").trim()] as const)
+    .map(([k, v]) => [k, normalizeForDetailSignature(v ?? "")] as const)
     .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   return JSON.stringify(entries);
 }
@@ -171,6 +202,33 @@ function distinctSortedTermLabels(labels: string[]): string {
   if (u.length === 0) return "";
   u.sort((a, b) => seasonSortRank(a) - seasonSortRank(b) || a.localeCompare(b, undefined, { sensitivity: "base" }));
   return u.join("/");
+}
+
+/** First matching season word for short labels like Fall/Spring. */
+function primarySeasonFromLabel(label: string): string | null {
+  const l = label.toLowerCase();
+  if (l.includes("fall")) return "Fall";
+  if (l.includes("spring")) return "Spring";
+  if (l.includes("summer")) return "Summer";
+  if (l.includes("winter")) return "Winter";
+  return null;
+}
+
+/** e.g. Fall · 2027 + Spring · 2028 → Fall/Spring; single season → that word only. */
+function shortSlashSeasonsFromTermLabels(labels: string[]): string | null {
+  const seasons: string[] = [];
+  for (const lab of labels) {
+    const s = primarySeasonFromLabel(lab);
+    if (s && !seasons.includes(s)) seasons.push(s);
+  }
+  if (seasons.length === 0) return null;
+  seasons.sort((a, b) => seasonSortRank(a) - seasonSortRank(b));
+  return seasons.join("/");
+}
+
+function setCellCi(row: Record<string, string>, fieldLower: string, value: string): void {
+  const key = Object.keys(row).find((k) => k.trim().toLowerCase() === fieldLower);
+  if (key) row[key] = value;
 }
 
 function mergeAugmentedRowBucket(
@@ -198,6 +256,12 @@ function mergeAugmentedRowBucket(
   }
   template[APPLICATION_WINDOW_COLUMN] = windowLabel;
   template["Program ID"] = pids.join(", ");
+
+  const slash = shortSlashSeasonsFromTermLabels(termLabels);
+  if (slash) setCellCi(template, "start term", slash);
+  else if (windowLabel && windowLabel !== "—") setCellCi(template, "start term", windowLabel);
+  if (pids.length > 1) setCellCi(template, "start year", "");
+
   return template;
 }
 
@@ -213,9 +277,8 @@ function refreshAugmentedRowWindow(
 }
 
 /**
- * After augmenting with {@link augmentDetailRowsWithApplicationWindow}, merge rows whose
- * non–Program-ID content is identical but terms differ (e.g. one Fall row + one Spring row → one
- * row with Application window “Fall/Spring”).
+ * After {@link augmentDetailRowsWithApplicationWindow}, merges **Program questions**, **Answers**,
+ * and **Documents** rows the same way. See file-top policy comment.
  */
 export function collapseAugmentedDetailRowsByMatchingContent(
   rows: Record<string, string>[],

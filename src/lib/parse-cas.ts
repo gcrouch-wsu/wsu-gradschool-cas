@@ -177,6 +177,10 @@ function rowsForProgram(
   return rows.filter((r) => cleanProgramId(r["Program ID"] || "") === pid);
 }
 
+/**
+ * Per–Program ID dedupe only. On the public page, identical rows across terms are merged into
+ * one line (Fall/Spring, etc.); see `application-window-label.ts` collapse helpers.
+ */
 function dedupeQuestions(rows: Record<string, string>[]): Record<string, string>[] {
   const seen = new Set<string>();
   const out: Record<string, string>[] = [];
@@ -191,6 +195,7 @@ function dedupeQuestions(rows: Record<string, string>[]): Record<string, string>
   return out;
 }
 
+/** Per–Program ID dedupe; public merge of identical cross-term rows is in application-window-label. */
 function dedupeDocuments(rows: Record<string, string>[]): Record<string, string>[] {
   const seen = new Set<string>();
   const out: Record<string, string>[] = [];
@@ -205,6 +210,7 @@ function dedupeDocuments(rows: Record<string, string>[]): Record<string, string>
   return out;
 }
 
+/** Per–Program ID dedupe; public merge of identical cross-term rows is in application-window-label. */
 function dedupeAnswers(rows: Record<string, string>[]): Record<string, string>[] {
   const seen = new Set<string>();
   const out: Record<string, string>[] = [];

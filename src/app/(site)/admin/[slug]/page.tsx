@@ -834,10 +834,11 @@ export default function AdminPublicationPage() {
               Program questions, Answers, and Documents tables uses{" "}
               <strong className="text-wsu-gray-dark">Start Term</strong> (and Start Year when
               present) from Program Attributes for that row’s Program ID, then your “In title” line
-              if the term is blank. Rows that are identical except for Program ID/term are merged
-              into one line with{" "}
-              <strong className="text-wsu-gray-dark">Fall/Spring</strong>-style labels when the
-              terms differ.
+              if the term is blank. When <strong className="text-wsu-gray-dark">all visible columns
+              except Program ID, Start Term, and Start Year</strong> match another row (ignoring
+              minor whitespace differences), those rows are <strong className="text-wsu-gray-dark">
+              merged into one</strong> with a combined term label and both Program IDs listed;
+              if anything differs, rows stay separate so requirements are never mixed up.
             </p>
             <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-wsu-gray/15 bg-wsu-cream/60 px-4 py-3">
               <input
