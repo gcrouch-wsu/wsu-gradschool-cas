@@ -181,7 +181,9 @@ function dedupeQuestions(rows: Record<string, string>[]): Record<string, string>
   const seen = new Set<string>();
   const out: Record<string, string>[] = [];
   for (const r of rows) {
-    const k = `${r["Question Block"] || ""}|${r["Question"] || ""}|${r["Question Type"] || ""}`;
+    const pid = cleanProgramId(r["Program ID"] || "");
+    /** Program ID: same question text can exist per application window (Fall vs Spring). */
+    const k = `${pid}|${r["Question Block"] || ""}|${r["Question"] || ""}|${r["Question Type"] || ""}`;
     if (seen.has(k)) continue;
     seen.add(k);
     out.push(r);
@@ -193,7 +195,9 @@ function dedupeDocuments(rows: Record<string, string>[]): Record<string, string>
   const seen = new Set<string>();
   const out: Record<string, string>[] = [];
   for (const r of rows) {
-    const k = `${r["Document Type"] || ""}|${r["Application Instructions"] || ""}`;
+    const pid = cleanProgramId(r["Program ID"] || "");
+    /** Program ID: same document type/instructions repeat per CAS Program ID / term. */
+    const k = `${pid}|${r["Document Type"] || ""}|${r["Application Instructions"] || ""}`;
     if (seen.has(k)) continue;
     seen.add(k);
     out.push(r);
@@ -205,7 +209,8 @@ function dedupeAnswers(rows: Record<string, string>[]): Record<string, string>[]
   const seen = new Set<string>();
   const out: Record<string, string>[] = [];
   for (const r of rows) {
-    const k = r["Answer Value"] || JSON.stringify(r);
+    const pid = cleanProgramId(r["Program ID"] || "");
+    const k = `${pid}|${r["Answer Value"] || JSON.stringify(r)}`;
     if (seen.has(k)) continue;
     seen.add(k);
     out.push(r);
