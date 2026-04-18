@@ -29,6 +29,8 @@
 *.xls
 ~$*
 dump_excel.js
+API.txt
+api.md
 
 # debug
 npm-debug.log*
@@ -39,6 +41,12 @@ yarn-error.log*
 # env files
 .env*.local
 .env
+.env.gradcas
+gradcas-response*.json
+gradcas-response*.txt
+tools/gradcas/.cache/
+__pycache__/
+*.pyc
 
 # vercel
 .vercel

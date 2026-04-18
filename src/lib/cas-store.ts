@@ -28,6 +28,7 @@ import {
 } from "./parse-cas";
 
 const BLOB_PREFIX = "cas-publications";
+const CURRENT_VIEW_PATHNAME = `${BLOB_PREFIX}/_current-view.json`;
 
 /** Stored as one JSON file per publication in Vercel Blob. */
 export type StoredPublicationBlob = {
@@ -92,6 +93,11 @@ export type PublicationPublicHeader = {
   subtitle: string;
   logoUrl: string | null;
   titleHref: string;
+};
+
+type CurrentViewBlob = {
+  slug: string;
+  updated_at: string;
 };
 
 export function resolvePublicationPublicHeader(row: PublicationRow): PublicationPublicHeader {
@@ -186,6 +192,21 @@ async function persistBlob(body: StoredPublicationBlob): Promise<void> {
   });
 }
 
+async function persistCurrentView(slug: string): Promise<void> {
+  const token = requireBlobToken();
+  const body: CurrentViewBlob = {
+    slug,
+    updated_at: new Date().toISOString(),
+  };
+  await put(CURRENT_VIEW_PATHNAME, JSON.stringify(body), {
+    access: getBlobAccessMode(),
+    token,
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType: "application/json",
+  });
+}
+
 function mapToPublicGroup(
   g: StoredGroup,
   visibleColumnKeys: string[],
@@ -272,6 +293,32 @@ export async function getPublicationBySlug(
   }
 }
 
+export async function getCurrentViewSlug(): Promise<string | null> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!token) return null;
+  try {
+    const res = await get(CURRENT_VIEW_PATHNAME, {
+      access: getBlobAccessMode(),
+      token,
+      useCache: false,
+    });
+    if (!res?.stream) return null;
+    const text = await new Response(res.stream as ReadableStream).text();
+    const parsed = JSON.parse(text) as Partial<CurrentViewBlob>;
+    return typeof parsed.slug === "string" && /^[a-z0-9]{8,32}$/.test(parsed.slug)
+      ? parsed.slug
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getCurrentViewPublication(): Promise<PublicationRow | null> {
+  const slug = await getCurrentViewSlug();
+  if (!slug) return null;
+  return getPublicationBySlug(slug);
+}
+
 export async function createPublication(input: {
   slug: string;
   title: string;
@@ -306,6 +353,7 @@ export async function createPublication(input: {
     updated_at: now,
   };
   await persistBlob(body);
+  await persistCurrentView(input.slug);
 }
 
 function validateSubset(keys: string[] | undefined, allowed: Set<string>): string[] {
@@ -458,6 +506,7 @@ export async function updatePublication(
     updated_at: now,
   };
   await persistBlob(body);
+  await persistCurrentView(existing.slug);
   return getPublicationBySlug(slug);
 }
 
@@ -536,5 +585,6 @@ export async function mergePublicationFromUpload(
     updated_at: now,
   };
   await persistBlob(body);
+  await persistCurrentView(existing.slug);
   return getPublicationBySlug(slug);
 }

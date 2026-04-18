@@ -477,7 +477,8 @@ export default function AdminPublicationPage() {
     );
   }
 
-  const publicPath = `/s/${slug}`;
+  const publicPath = "/view";
+  const snapshotPath = `/s/${slug}`;
 
   if (!slug) {
     return <p className="p-6 text-sm text-wsu-gray">Invalid publication.</p>;
@@ -509,22 +510,63 @@ export default function AdminPublicationPage() {
             rel="noopener noreferrer"
             className="rounded-md px-2 py-1 font-medium text-wsu-crimson hover:bg-wsu-crimson/5"
           >
-            Open public page ↗
+            Open live public page ↗
+          </a>
+          <a
+            href={snapshotPath}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md px-2 py-1 font-medium text-wsu-gray hover:bg-wsu-crimson/5 hover:text-wsu-crimson"
+          >
+            Open snapshot ↗
           </a>
         </div>
-        <button
-          type="button"
-          onClick={() => void logout()}
-          className="text-sm text-wsu-gray underline decoration-wsu-gray/30 hover:text-wsu-crimson"
-        >
-          Sign out
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void saveAll()}
+            disabled={!dirty || saving || !saved}
+            className="rounded-lg bg-wsu-crimson px-4 py-2 text-sm font-semibold text-white shadow-md hover:bg-wsu-crimson-dark disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="text-sm text-wsu-gray underline decoration-wsu-gray/30 hover:text-wsu-crimson"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
 
       <h1 className="text-2xl font-semibold tracking-tight text-wsu-gray-dark">
         Publication settings
       </h1>
       <p className="mt-1 font-mono text-xs text-wsu-gray">slug: {slug}</p>
+      <p className="mt-2 text-sm text-wsu-gray">
+        Live public URL:{" "}
+        <a
+          href={publicPath}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-wsu-crimson underline decoration-wsu-crimson/30"
+        >
+          {publicPath}
+        </a>
+        {" "}updates whenever you save this publication.
+      </p>
+      <p className="mt-1 text-xs text-wsu-gray">
+        Snapshot URL:{" "}
+        <a
+          href={snapshotPath}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-wsu-gray-dark underline decoration-wsu-gray/30"
+        >
+          {snapshotPath}
+        </a>
+      </p>
 
       {error && (
         <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">

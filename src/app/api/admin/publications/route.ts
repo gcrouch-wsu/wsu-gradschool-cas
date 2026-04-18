@@ -114,7 +114,8 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     slug,
-    publicUrl: `/s/${slug}`,
+    publicUrl: "/view",
+    slugUrl: `/s/${slug}`,
     adminUrl: `/admin/${slug}`,
   });
 }

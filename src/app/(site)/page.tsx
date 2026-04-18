@@ -28,7 +28,11 @@ export default function Home() {
             Already signed in? Continue to upload →
           </Link>
           <p className="text-center text-xs text-wsu-gray">
-            After publishing, share the public link{" "}
+            After publishing, share the stable public link{" "}
+            <code className="rounded bg-wsu-cream px-1.5 py-0.5 font-mono text-wsu-gray-dark">
+              /view
+            </code>{" "}
+            or a specific snapshot at{" "}
             <code className="rounded bg-wsu-cream px-1.5 py-0.5 font-mono text-wsu-gray-dark">
               /s/&lt;slug&gt;
             </code>
