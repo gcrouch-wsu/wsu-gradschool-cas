@@ -1,7 +1,12 @@
 import { customAlphabet } from "nanoid";
 import { NextResponse } from "next/server";
-import { createPublication } from "@/lib/cas-store";
+import { ZodError } from "zod";
+import { createPublication, getPublicationBySlug, updatePublication } from "@/lib/cas-store";
 import { parseAndMergeCasWorkbooks, parseCasWorkbook } from "@/lib/parse-cas";
+import {
+  parsePublicationSettingsImport,
+  sanitizePublicationSettingsPatch,
+} from "@/lib/publication-settings-snapshot";
 import { unauthorizedIfNotAdmin } from "@/lib/require-admin";
 
 export const runtime = "nodejs";
@@ -112,10 +117,46 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
+  let settingsImportError: string | null = null;
+  let droppedDefaultGroupKey = false;
+
+  const settingsFile = form.get("publication_settings");
+  if (settingsFile instanceof File && settingsFile.size > 0) {
+    try {
+      const text = await settingsFile.text();
+      const raw = JSON.parse(text) as unknown;
+      const patch = parsePublicationSettingsImport(raw);
+      const row = await getPublicationBySlug(slug);
+      if (!row) {
+        settingsImportError =
+          "Publication was created but settings could not be applied (could not reload the new publication).";
+      } else {
+        const { patch: sanitized, droppedDefaultGroupKey: dropped } =
+          sanitizePublicationSettingsPatch(row, patch);
+        const updated = await updatePublication(slug, sanitized);
+        if (!updated) {
+          settingsImportError = "Publication was created but settings could not be saved.";
+        } else {
+          droppedDefaultGroupKey = dropped;
+        }
+      }
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        settingsImportError = "Settings file is not valid JSON.";
+      } else if (e instanceof ZodError) {
+        settingsImportError = "Settings file does not match the expected export format.";
+      } else {
+        settingsImportError = e instanceof Error ? e.message : "Settings import failed.";
+      }
+    }
+  }
+
   return NextResponse.json({
     slug,
     publicUrl: "/view",
     slugUrl: `/s/${slug}`,
     adminUrl: `/admin/${slug}`,
+    ...(droppedDefaultGroupKey ? { droppedDefaultGroupKey: true } : {}),
+    ...(settingsImportError ? { settingsImportError } : {}),
   });
 }

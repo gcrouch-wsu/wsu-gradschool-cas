@@ -3,6 +3,7 @@
 import { upload } from "@vercel/blob/client";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AdminSignOutButton } from "@/components/AdminSignOutButton";
 import {
   PROGRAM_NAME_STRIP_COMMA_AND_REST,
   PROGRAM_NAME_STRIP_COMMA_AND_REST_ALIAS,
@@ -236,6 +237,27 @@ export default function AdminPublicationPage() {
   }, [loadConfig, loadBranding]);
 
   useEffect(() => {
+    if (!slug) return;
+    try {
+      const errKey = `adminSettingsImportError:${slug}`;
+      const dropKey = `adminSettingsImportDroppedDefault:${slug}`;
+      const err = sessionStorage.getItem(errKey);
+      const dropped = sessionStorage.getItem(dropKey);
+      if (err) sessionStorage.removeItem(errKey);
+      if (dropped) sessionStorage.removeItem(dropKey);
+      if (err) {
+        setSettingsImportMessage(err);
+      } else if (dropped) {
+        setSettingsImportMessage(
+          "Imported settings were applied. The saved default program key did not exist in this workbook and was left unchanged."
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [slug]);
+
+  useEffect(() => {
     if (!branding?.branding.profiles.some((p) => p.status.status === "running")) return;
     const timer = window.setInterval(() => {
       void loadBranding();
@@ -283,12 +305,6 @@ export default function AdminPublicationPage() {
     draftPublicHeroBody,
     draftProgramStripText,
   ]);
-
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-    router.push("/admin/login");
-    router.refresh();
-  }
 
   async function runBrandingAction(profile: string, action: "guide" | "export") {
     setBrandingBusyProfile(`${profile}:${action}`);
@@ -623,7 +639,7 @@ export default function AdminPublicationPage() {
             onClick={() => router.push("/admin")}
             className="rounded-md px-2 py-1 text-wsu-gray hover:bg-wsu-crimson/5 hover:text-wsu-crimson"
           >
-            ← New upload
+            ← Admin home
           </button>
           <span className="text-wsu-gray/40">|</span>
           <a
@@ -652,13 +668,7 @@ export default function AdminPublicationPage() {
           >
             {saving ? "Saving…" : "Save"}
           </button>
-          <button
-            type="button"
-            onClick={() => void logout()}
-            className="text-sm text-wsu-gray underline decoration-wsu-gray/30 hover:text-wsu-crimson"
-          >
-            Sign out
-          </button>
+          <AdminSignOutButton />
         </div>
       </div>
 
