@@ -18,6 +18,7 @@ import {
 import { sanitizeBrandingHtml } from "@/lib/sanitize-branding-html";
 import type {
   CasOffering,
+  ProgramBranding,
   PublicProgramGroup,
   PublicPublicationPayload,
   TermFieldSetting,
@@ -270,6 +271,47 @@ function visibleTermBullets(o: CasOffering, settings: TermFieldSetting[]) {
     .filter((x): x is { label: string; value: string } => x !== null);
 }
 
+function normalizeForComparison(value: string | null | undefined): string {
+  return String(value ?? "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function brandingFingerprint(branding: ProgramBranding | null | undefined): string {
+  if (!branding) return "missing";
+  return JSON.stringify({
+    status: branding.status,
+    title: normalizeForComparison(branding.studentFacingTitle),
+    deadline: normalizeForComparison(branding.deadlineText),
+    image: normalizeForComparison(branding.headerImageUrl),
+    html: normalizeForComparison(branding.instructionsHtml || branding.instructionsText),
+    links: branding.links.map((link) => ({
+      text: normalizeForComparison(link.text),
+      href: normalizeForComparison(link.href),
+    })),
+  });
+}
+
+function brandingDifferenceMap(offerings: CasOffering[]): Map<string, boolean> {
+  const branded = offerings.filter((offering) => offering.branding);
+  const fingerprints = branded.map((offering) => brandingFingerprint(offering.branding));
+  const unique = new Set(fingerprints);
+  const differs = new Map<string, boolean>();
+  if (unique.size <= 1) return differs;
+  const counts = new Map<string, number>();
+  for (const fingerprint of fingerprints) {
+    counts.set(fingerprint, (counts.get(fingerprint) ?? 0) + 1);
+  }
+  const baseline = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  for (const offering of branded) {
+    differs.set(offering.programId, brandingFingerprint(offering.branding) !== baseline);
+  }
+  return differs;
+}
+
 function ProgramDetail({
   group,
   termFieldSettings,
@@ -321,6 +363,11 @@ function ProgramDetail({
     () => prependApplicationWindowColumn(documentColumns),
     [documentColumns]
   );
+  const brandingDiffersByProgramId = useMemo(
+    () => brandingDifferenceMap(group.offerings),
+    [group.offerings]
+  );
+  const hasBrandingDifferences = [...brandingDiffersByProgramId.values()].some(Boolean);
 
   return (
     <article className="space-y-10 rounded-xl border border-wsu-gray/10 bg-white p-6 shadow-sm">
@@ -386,6 +433,11 @@ function ProgramDetail({
             Branding is linked by CAS Program ID so coordinators can review the same header image
             and HTML instructions applicants see.
           </p>
+          {hasBrandingDifferences ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+              Branding differs between application windows. Changed cards are highlighted below.
+            </p>
+          ) : null}
           <div className="space-y-4">
             {group.offerings.map((o) => (
               <BrandingPreviewCard
@@ -393,6 +445,7 @@ function ProgramDetail({
                 offering={o}
                 termFieldSettings={termFieldSettings}
                 showProgramIdOnPublic={showProgramIdOnPublic}
+                brandingDiffers={brandingDiffersByProgramId.get(o.programId) === true}
               />
             ))}
           </div>
@@ -495,10 +548,12 @@ function BrandingPreviewCard({
   offering,
   termFieldSettings,
   showProgramIdOnPublic,
+  brandingDiffers,
 }: {
   offering: CasOffering;
   termFieldSettings: TermFieldSetting[];
   showProgramIdOnPublic: boolean;
+  brandingDiffers: boolean;
 }) {
   const branding = offering.branding;
   const titleLine = applicationWindowCardTitle(offering, termFieldSettings);
@@ -519,9 +574,26 @@ function BrandingPreviewCard({
   const hasHtml = safeHtml.trim().length > 0;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-wsu-gray/10 bg-white shadow-sm">
-      <div className="border-b border-wsu-gray/10 bg-wsu-cream/40 px-4 py-3">
-        <p className="text-base font-semibold text-wsu-gray-dark">{titleLine}</p>
+    <div
+      className={`overflow-hidden rounded-lg border bg-white shadow-sm ${
+        brandingDiffers ? "border-amber-300 ring-2 ring-amber-200" : "border-wsu-gray/10"
+      }`}
+    >
+      <div
+        className={`border-b px-4 py-3 ${
+          brandingDiffers
+            ? "border-amber-200 bg-amber-50"
+            : "border-wsu-gray/10 bg-wsu-cream/40"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-base font-semibold text-wsu-gray-dark">{titleLine}</p>
+          {brandingDiffers ? (
+            <span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-amber-950">
+              Different branding
+            </span>
+          ) : null}
+        </div>
         <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-wsu-gray">
           {showProgramIdOnPublic ? <span>Program ID: {offering.programId}</span> : null}
           <span>Profile: {branding.sourceProfile}</span>
