@@ -1,4 +1,4 @@
-import { get, put } from "@vercel/blob";
+import { get, list, put } from "@vercel/blob";
 import type {
   CasPublicationData,
   PublicPublicationPayload,
@@ -325,12 +325,35 @@ export async function getCurrentViewSlug(): Promise<string | null> {
       token,
       useCache: false,
     });
-    if (!res?.stream) return null;
+    if (!res?.stream) return getLatestPublicationSlug();
     const text = await new Response(res.stream as ReadableStream).text();
     const parsed = JSON.parse(text) as Partial<CurrentViewBlob>;
     return typeof parsed.slug === "string" && /^[a-z0-9]{8,32}$/.test(parsed.slug)
       ? parsed.slug
-      : null;
+      : await getLatestPublicationSlug();
+  } catch {
+    return getLatestPublicationSlug();
+  }
+}
+
+async function getLatestPublicationSlug(): Promise<string | null> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!token) return null;
+  try {
+    const rows = await list({
+      token,
+      prefix: `${BLOB_PREFIX}/`,
+      limit: 1000,
+    });
+    const latest = rows.blobs
+      .filter((blob) => {
+        const name = blob.pathname.slice(`${BLOB_PREFIX}/`.length);
+        return /^[a-z0-9]{8,32}\.json$/.test(name);
+      })
+      .sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime())[0];
+    if (!latest) return null;
+    const name = latest.pathname.slice(`${BLOB_PREFIX}/`.length);
+    return name.replace(/\.json$/, "");
   } catch {
     return null;
   }
