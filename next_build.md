@@ -39,6 +39,8 @@ Vercel decides what needs to be captured from the merged publication data and ca
 | Flask loads manifest from Blob | Implemented via `tools/branding/read-capture-manifest.mjs` |
 | Admin branding coverage, manifest pointer, local app link | Implemented in `src/app/(site)/admin/[slug]/page.tsx` and `src/app/api/admin/publications/[slug]/branding/route.ts` |
 | Admin status: `missing` vs `stale` (timestamp) with `statusDetail` | Implemented in branding route; client types include `hasMissingIds`, `dataNewerThanSnapshot` |
+| Public viewer: Department → Program → Search | Implemented in `src/app/s/[slug]/PublicCasView.tsx` |
+| Branding diff UI: two-column layout when two windows; block-level left accent for differing HTML | Implemented in `PublicCasView.tsx` |
 
 ## Current Architecture
 
@@ -55,6 +57,11 @@ Vercel decides what needs to be captured from the merged publication data and ca
 
 - **Route:** `GET /api/admin/publications/[slug]/settings-export` (`src/app/api/admin/publications/[slug]/settings-export/route.ts`).
 - **Download filename today:** `cas-publication-settings-{slug}.json` (slug is opaque, e.g. `l69576ya2z1k`, so filenames are hard to recognize in Explorer).
+
+### Admin vs “pull from public” (without reloading workbooks)
+
+- **Today:** Admin edits **whatever publication is already stored in Blob** for that slug. Merged CAS data and settings live in `cas-publications/{slug}.json`. You do **not** need to re-upload Excel on every visit if nothing changed—only when you need to refresh export data.
+- **Not implemented yet:** A one-click **“open admin for the publication currently on the home page”** or **“import settings JSON from live Blob”** without downloading a file first. Coordinators still use **settings export/import** (JSON files) to copy display settings between environments. See **Planned: Admin Navigation** below.
 
 ### Local Flask
 

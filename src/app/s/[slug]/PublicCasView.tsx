@@ -57,35 +57,31 @@ function departmentGroupLabel(g: PublicProgramGroup): string {
   return d || OTHER_DEPT_LABEL;
 }
 
-function sortGroupsForSearch(groups: PublicProgramGroup[], rawQuery: string): PublicProgramGroup[] {
+/** Programs in one department, optionally narrowed by unstructured search (name, code, Program ID). */
+function programsInDepartmentFiltered(
+  groups: PublicProgramGroup[],
+  departmentLabel: string,
+  rawQuery: string
+): PublicProgramGroup[] {
+  const inDept = groups.filter((g) => departmentGroupLabel(g) === departmentLabel);
   const ql = rawQuery.trim().toLowerCase();
-  const byDeptThenName = (a: PublicProgramGroup, b: PublicProgramGroup) => {
-    const da = departmentGroupLabel(a);
-    const db = departmentGroupLabel(b);
-    const c = da.localeCompare(db, undefined, { sensitivity: "base" });
-    if (c !== 0) {
-      if (da === OTHER_DEPT_LABEL) return 1;
-      if (db === OTHER_DEPT_LABEL) return -1;
-      return c;
-    }
-    return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
-  };
   if (!ql) {
-    return [...groups].sort(byDeptThenName);
+    return [...inDept].sort((a, b) =>
+      a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" })
+    );
   }
-  return [...groups]
+  return inDept
     .filter((g) => {
-      if (g.displayName.toLowerCase().includes(ql) || g.groupKey.toLowerCase().includes(ql)) {
-        return true;
-      }
-      const dept = g.departmentName?.trim().toLowerCase();
-      return Boolean(dept && dept.includes(ql));
+      if (g.displayName.toLowerCase().includes(ql)) return true;
+      if (g.groupKey.toLowerCase().includes(ql)) return true;
+      if (g.departmentName?.trim().toLowerCase().includes(ql)) return true;
+      return g.offerings.some((o) => o.programId.toLowerCase().includes(ql));
     })
     .sort((a, b) => {
       const ra = rankGroupForQuery(a, ql);
       const rb = rankGroupForQuery(b, ql);
       if (rb !== ra) return rb - ra;
-      return byDeptThenName(a, b);
+      return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
     });
 }
 
@@ -121,6 +117,34 @@ function pickGroup(
   return groups.find((g) => g.groupKey === key) ?? groups[0];
 }
 
+function initialDeptFromGroups(groups: PublicProgramGroup[], defaultGroupKey: string): string {
+  if (groups.length === 0) return OTHER_DEPT_LABEL;
+  const sections = programsByDepartmentForSelect(groups);
+  const labels = sections.map((s) => s.label);
+  if (labels.length === 0) return OTHER_DEPT_LABEL;
+  const defaultKey =
+    defaultGroupKey && groups.some((g) => g.groupKey === defaultGroupKey)
+      ? defaultGroupKey
+      : groups[0]?.groupKey ?? "";
+  const g = groups.find((x) => x.groupKey === defaultKey);
+  const label = g ? departmentGroupLabel(g) : labels[0];
+  return labels.includes(label) ? label : labels[0];
+}
+
+function initialProgramKeyForDept(
+  groups: PublicProgramGroup[],
+  defaultGroupKey: string,
+  dept: string
+): string {
+  const list = programsInDepartmentFiltered(groups, dept, "");
+  const want =
+    defaultGroupKey && groups.some((g) => g.groupKey === defaultGroupKey)
+      ? defaultGroupKey
+      : list[0]?.groupKey ?? "";
+  if (list.some((g) => g.groupKey === want)) return want;
+  return list[0]?.groupKey ?? "";
+}
+
 function HeroRichText({ text }: { text: string }) {
   const blocks = text.split(/\n{2,}/);
   return (
@@ -144,40 +168,30 @@ export default function PublicCasView({
 }: {
   initial: PublicPublicationPayload;
 }) {
+  const defaultGk = initial.defaultGroupKey || "";
+  const [selectedDept, setSelectedDept] = useState(() =>
+    initialDeptFromGroups(initial.groups, defaultGk)
+  );
+  const [selectedKey, setSelectedKey] = useState(() =>
+    initialProgramKeyForDept(initial.groups, defaultGk, initialDeptFromGroups(initial.groups, defaultGk))
+  );
   const [query, setQuery] = useState("");
-  const [selectedKey, setSelectedKey] = useState(
-    initial.defaultGroupKey && initial.groups.some((g) => g.groupKey === initial.defaultGroupKey)
-      ? initial.defaultGroupKey
-      : initial.groups[0]?.groupKey ?? ""
+
+  const departmentSections = useMemo(
+    () => programsByDepartmentForSelect(initial.groups),
+    [initial.groups]
   );
 
-  const filtered = useMemo(
-    () => sortGroupsForSearch(initial.groups, query),
-    [initial.groups, query]
-  );
-
-  const filteredByDepartment = useMemo(
-    () => programsByDepartmentForSelect(filtered),
-    [filtered]
-  );
-
-  const filteredFlat = useMemo(
-    () => filteredByDepartment.flatMap((section) => section.groups),
-    [filteredByDepartment]
+  const programsInDept = useMemo(
+    () => programsInDepartmentFiltered(initial.groups, selectedDept, query),
+    [initial.groups, selectedDept, query]
   );
 
   useEffect(() => {
-    const ql = query.trim().toLowerCase();
-    if (!ql) {
-      setSelectedKey((prev) =>
-        initial.groups.some((g) => g.groupKey === prev)
-          ? prev
-          : initial.groups[0]?.groupKey ?? ""
-      );
-      return;
-    }
-    setSelectedKey(filteredFlat[0]?.groupKey ?? "");
-  }, [query, filteredFlat, initial.groups]);
+    setSelectedKey((prev) =>
+      programsInDept.some((g) => g.groupKey === prev) ? prev : programsInDept[0]?.groupKey ?? ""
+    );
+  }, [selectedDept, query, programsInDept]);
 
   const selected = useMemo(
     () => pickGroup(initial.groups, selectedKey),
@@ -185,11 +199,11 @@ export default function PublicCasView({
   );
 
   const stepProgram = (delta: number) => {
-    if (filteredFlat.length === 0) return;
-    const idx = filteredFlat.findIndex((g) => g.groupKey === selectedKey);
+    if (programsInDept.length === 0) return;
+    const idx = programsInDept.findIndex((g) => g.groupKey === selectedKey);
     const base = idx < 0 ? 0 : idx;
-    const next = (base + delta + filteredFlat.length) % filteredFlat.length;
-    setSelectedKey(filteredFlat[next].groupKey);
+    const next = (base + delta + programsInDept.length) % programsInDept.length;
+    setSelectedKey(programsInDept[next].groupKey);
   };
 
   const showOrg =
@@ -210,18 +224,22 @@ export default function PublicCasView({
         </div>
       </header>
 
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end">
-        <label className="min-w-0 flex-1 text-sm font-medium text-wsu-gray-dark">
-          Search
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Program name…"
-            className="mt-1.5 w-full rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm placeholder:text-wsu-gray/60 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
-          />
+      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end">
+        <label className="min-w-[min(100%,260px)] flex-1 text-sm font-medium text-wsu-gray-dark">
+          Department
+          <select
+            value={selectedDept}
+            onChange={(e) => setSelectedDept(e.target.value)}
+            className="mt-1.5 w-full rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
+          >
+            {departmentSections.map((section) => (
+              <option key={section.label} value={section.label}>
+                {section.label}
+              </option>
+            ))}
+          </select>
         </label>
-        <label className="min-w-[min(100%,280px)] flex-1 text-sm font-medium text-wsu-gray-dark">
+        <label className="min-w-[min(100%,320px)] flex-[2] text-sm font-medium text-wsu-gray-dark">
           Program
           <div className="mt-1.5 flex gap-2">
             <select
@@ -229,20 +247,16 @@ export default function PublicCasView({
               onChange={(e) => setSelectedKey(e.target.value)}
               className="min-w-0 flex-1 rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
             >
-              {filteredByDepartment.map((section) => (
-                <optgroup key={section.label} label={section.label}>
-                  {section.groups.map((g) => (
-                    <option key={g.groupKey} value={g.groupKey}>
-                      {g.displayName}
-                    </option>
-                  ))}
-                </optgroup>
+              {programsInDept.map((g) => (
+                <option key={g.groupKey} value={g.groupKey}>
+                  {g.displayName}
+                </option>
               ))}
             </select>
             <button
               type="button"
               aria-label="Previous program"
-              disabled={filteredFlat.length <= 1}
+              disabled={programsInDept.length <= 1}
               onClick={() => stepProgram(-1)}
               className="shrink-0 rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base font-semibold leading-none text-wsu-gray-dark shadow-sm hover:bg-wsu-cream/50 disabled:pointer-events-none disabled:opacity-40 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
             >
@@ -251,7 +265,7 @@ export default function PublicCasView({
             <button
               type="button"
               aria-label="Next program"
-              disabled={filteredFlat.length <= 1}
+              disabled={programsInDept.length <= 1}
               onClick={() => stepProgram(1)}
               className="shrink-0 rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base font-semibold leading-none text-wsu-gray-dark shadow-sm hover:bg-wsu-cream/50 disabled:pointer-events-none disabled:opacity-40 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
             >
@@ -259,11 +273,23 @@ export default function PublicCasView({
             </button>
           </div>
         </label>
+        <label className="min-w-0 flex-1 text-sm font-medium text-wsu-gray-dark lg:max-w-md">
+          Search
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Narrow by name, code, or Program ID…"
+            className="mt-1.5 w-full rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm placeholder:text-wsu-gray/60 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
+          />
+        </label>
       </div>
 
-      {filteredFlat.length === 0 ? (
+      {programsInDept.length === 0 ? (
         <p className="rounded-lg border border-wsu-gray/15 bg-white px-4 py-6 text-wsu-gray">
-          No programs match that search.
+          {query.trim()
+            ? "No programs in this department match your search."
+            : "No programs in this department."}
         </p>
       ) : selected ? (
         <ProgramDetail
@@ -349,7 +375,26 @@ type BrandingDifferenceInfo = {
 const BRANDING_BLOCK_RE =
   /<(p|li|h[1-6]|blockquote|div)(\s[^>]*)?>([\s\S]*?)<\/\1>/gi;
 const BRANDING_LINE_BREAK_RE = /<br\s*\/?>/gi;
-const BRANDING_DIFF_CLASS = "rounded border-2 border-amber-300 bg-amber-50 px-2 py-1";
+/** Whole block gets a left accent — avoids stacked inline yellow boxes. */
+const BRANDING_DIFF_BLOCK_CLASS =
+  "border-l-4 border-amber-400 bg-amber-50 pl-3 py-2 rounded-r my-1.5";
+
+function mergeHtmlClass(attrs: string, cls: string): string {
+  const a = attrs.trim();
+  const m = a.match(/class\s*=\s*"([^"]*)"/i);
+  if (m) {
+    return a.replace(/class\s*=\s*"[^"]*"/i, `class="${m[1]} ${cls}"`);
+  }
+  return `${a ? `${a} ` : ""}class="${cls}"`;
+}
+
+function blockHasDifferingLine(inner: string, differingLines: Set<string>): boolean {
+  for (const part of String(inner).split(BRANDING_LINE_BREAK_RE)) {
+    const t = normalizeForComparison(part);
+    if (t && differingLines.has(t)) return true;
+  }
+  return false;
+}
 
 function linksFingerprint(branding: ProgramBranding): string {
   return JSON.stringify(
@@ -381,34 +426,17 @@ function instructionLineTexts(branding: ProgramBranding): string[] {
   return fallback ? [fallback] : [];
 }
 
-function highlightLineSegments(inner: string, differingLines: Set<string>) {
-  const parts = String(inner).split(/(<br\s*\/?>)/i);
-  let changed = false;
-  const html = parts
-    .map((part) => {
-      if (BRANDING_LINE_BREAK_RE.test(part)) {
-        BRANDING_LINE_BREAK_RE.lastIndex = 0;
-        return part;
-      }
-      const text = normalizeForComparison(part);
-      if (!text || !differingLines.has(text)) return part;
-      changed = true;
-      return `<span class="${BRANDING_DIFF_CLASS}">${part}</span>`;
-    })
-    .join("");
-  return { html, changed };
-}
-
 function highlightInstructionBlocks(html: string, differingLines: Set<string>): string {
   if (differingLines.size === 0) return html;
-  let highlighted = false;
+  let applied = false;
   const next = html.replace(BRANDING_BLOCK_RE, (full, tag, attrs = "", inner) => {
-    const lineResult = highlightLineSegments(inner, differingLines);
-    if (!lineResult.changed) return full;
-    highlighted = true;
-    return `<${tag}${attrs}>${lineResult.html}</${tag}>`;
+    if (!blockHasDifferingLine(inner, differingLines)) return full;
+    applied = true;
+    const merged = mergeHtmlClass(attrs, BRANDING_DIFF_BLOCK_CLASS);
+    return `<${tag}${merged}>${inner}</${tag}>`;
   });
-  return highlighted ? next : `<div class="${BRANDING_DIFF_CLASS}">${html}</div>`;
+  if (applied) return next;
+  return `<div class="${BRANDING_DIFF_BLOCK_CLASS}">${html}</div>`;
 }
 
 function brandingDifferenceMap(offerings: CasOffering[]): Map<string, BrandingDifferenceInfo> {
@@ -507,6 +535,8 @@ function ProgramDetail({
     (info) =>
       info.deadlineDiffers || info.linkDiffers || info.differingInstructionLines.size > 0
   );
+  const brandingCardCount = group.offerings.filter((o) => o.branding).length;
+  const brandingTwoColumn = brandingCardCount === 2;
 
   return (
     <article className="space-y-10 rounded-xl border border-wsu-gray/10 bg-white p-6 shadow-sm">
@@ -573,12 +603,30 @@ function ProgramDetail({
             and HTML instructions applicants see.
           </p>
           {hasBrandingDifferences ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
-              Branding wording differs between application windows. Highlighted boxes show the
-              specific editable text, instructions, or links that differ.
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              {brandingTwoColumn ? (
+                <>
+                  Branding differs between these two application windows. Compare the columns
+                  side by side. Paragraphs with a{" "}
+                  <span className="font-semibold">gold left bar</span> differ from the other
+                  window.
+                </>
+              ) : (
+                <>
+                  Branding differs between application windows. Paragraphs with a{" "}
+                  <span className="font-semibold">gold left bar</span> mark text that does not
+                  match across windows.
+                </>
+              )}
             </p>
           ) : null}
-          <div className="space-y-4">
+          <div
+            className={
+              brandingTwoColumn
+                ? "grid gap-4 lg:grid-cols-2 lg:items-start"
+                : "space-y-4"
+            }
+          >
             {group.offerings.map((o) => (
               <BrandingPreviewCard
                 key={`branding-${o.programId}`}
@@ -774,7 +822,7 @@ function BrandingPreviewCard({
                 <p
                   className={`shrink-0 text-sm font-semibold ${
                     deadlineDiffers
-                      ? "rounded border border-amber-300 bg-amber-200/25 px-2 py-1"
+                      ? "border-l-4 border-amber-400 bg-amber-50 pl-2 py-1 text-amber-950"
                       : ""
                   }`}
                 >
@@ -803,7 +851,9 @@ function BrandingPreviewCard({
         {branding.links.length > 0 && !hasHtml ? (
           <ul
             className={`list-disc space-y-1 pl-5 text-sm text-wsu-gray-dark ${
-              linksDiffers ? "rounded-lg border-2 border-amber-300 bg-amber-50 p-3 pl-8" : ""
+              linksDiffers
+                ? "border-l-4 border-amber-400 bg-amber-50 py-2 pl-8"
+                : ""
             }`}
           >
             {branding.links.map((link, index) => (
