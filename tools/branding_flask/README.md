@@ -34,21 +34,24 @@ http://127.0.0.1:5050
 
 ## Workflow
 
-For each CAS profile:
+Use the profile switcher to choose either GradCAS or EngineeringCAS. Run one profile at a time.
 
-1. Click `Open guided login`.
-2. In the browser that opens, log into WebAdMIT.
-3. Navigate to `CAS Configuration Portal`, then the correct CAS and cycle, then any program branding page.
-4. Close the browser window. This saves your login and navigation trail.
-5. Back in Flask, confirm the Excel path is correct.
-6. Or choose the Excel export with the file picker.
-7. Click `Capture and upload`.
+1. Select the Excel report and save it in the local app.
+2. Confirm the saved file path appears as the current Excel report.
+3. Click `Open guided login`.
+4. In the browser that opens, log into WebAdMIT.
+5. Navigate to `CAS Configuration Portal`, then the correct CAS and cycle, then any program branding page.
+6. Open 2 or 3 working program branding pages.
+7. Close the browser window. This saves your login and navigation trail.
+8. Click `Capture and upload`.
+
+Only use `Upload latest completed snapshot` if capture finished locally but the automatic Blob upload did not complete.
 
 When capture finishes, the latest snapshot is available to the deployed app through Vercel Blob. The public app reads the newest completed profile snapshots and joins branding back to flattened application data by `Program ID`.
 
 ## Notes
 
 - Run `gradcas` and `engineeringcas` separately because the login trail has to land in the correct CAS portal context.
-- Branding images are uploaded as public Blob assets so they can render in the browser.
+- Branding image asset upload is optional; the primary output is normalized private JSON.
 - Branding JSON is uploaded using `CAS_BLOB_ACCESS`, which defaults to private.
 - Empty shell captures are retained and marked as `empty_shell`; they do not stop the run.

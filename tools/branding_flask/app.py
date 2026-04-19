@@ -37,6 +37,15 @@ app = Flask(__name__)
 jobs: dict[str, dict[str, Any]] = {}
 
 
+def selected_profile() -> str:
+    profile = (request.args.get("profile") or "gradcas").strip().lower()
+    return profile if profile in PROFILES else "gradcas"
+
+
+def profile_redirect(profile: str):
+    return redirect(url_for("index", profile=profile))
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -60,6 +69,10 @@ def process_env() -> dict[str, str]:
     load_env_file(env, REPO_ROOT / ".env.local")
     load_env_file(env, REPO_ROOT / ".env.branding")
     return env
+
+
+def branding_login_url(env: dict[str, str]) -> str:
+    return env.get("BRANDING_LOGIN_URL", "https://prelaunch.webadmit.org/").strip()
 
 
 def blob_token_source(env: dict[str, str]) -> str:
@@ -469,16 +482,51 @@ def page_shell(body: str) -> str:
     .copy-row {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; }}
     .copy-row h3 {{ margin: 0; }}
     .copy-button {{ padding: 8px 11px; background: #6f6256; font-size: 12px; }}
+    .profile-tabs {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 18px; }}
+    .profile-tabs a {{ border: 1px solid var(--line); border-radius: 999px; padding: 10px 14px; background: white; color: var(--ink); font: 700 14px/1 Verdana, sans-serif; text-decoration: none; }}
+    .profile-tabs a.active {{ background: var(--accent); border-color: var(--accent); color: white; }}
+    .selected-file {{ margin-top: 8px; border: 1px solid var(--line); border-radius: 14px; background: #fffdf8; padding: 10px 12px; color: var(--muted); font: 13px/1.45 Verdana, sans-serif; overflow-wrap: anywhere; }}
+    .step-card {{ margin-top: 18px; border-top: 1px solid var(--line); padding-top: 18px; }}
+    .step-card h3 {{ margin: 0 0 8px; font-size: 1.15rem; }}
     .steps {{ margin: 0; padding-left: 1.2rem; color: var(--muted); font: 15px/1.55 Verdana, sans-serif; }}
     .steps li {{ margin: 5px 0; }}
     pre {{ white-space: pre-wrap; overflow-wrap: anywhere; background: #211b15; color: #fff3df; padding: 14px; border-radius: 16px; font-size: 12px; max-height: 260px; overflow: auto; }}
     .warn {{ border-left: 5px solid var(--accent); padding-left: 12px; color: var(--muted); font: 14px/1.5 Verdana, sans-serif; }}
   </style>
   <script>
-    function copyText(id) {{
+    function copyText(id, button) {{
       const node = document.getElementById(id);
       if (!node) return;
-      navigator.clipboard.writeText(node.innerText || node.textContent || "");
+      const text = node.innerText || node.textContent || "";
+      const done = () => {{
+        if (!button) return;
+        const old = button.innerText;
+        button.innerText = "Copied";
+        setTimeout(() => button.innerText = old, 1200);
+      }};
+      if (navigator.clipboard && window.isSecureContext) {{
+        navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+      }} else {{
+        fallbackCopy(text, done);
+      }}
+    }}
+    function fallbackCopy(text, done) {{
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.left = "-9999px";
+      document.body.appendChild(area);
+      area.select();
+      try {{ document.execCommand("copy"); done(); }} catch (_e) {{}}
+      document.body.removeChild(area);
+    }}
+    function showChosenFile(inputId, outputId) {{
+      const input = document.getElementById(inputId);
+      const output = document.getElementById(outputId);
+      if (!input || !output) return;
+      const file = input.files && input.files[0];
+      output.innerText = file ? `Selected: ${{file.name}} (${{Math.round(file.size / 1024)}} KB)` : "No file selected.";
     }}
   </script>
 </head>
@@ -500,6 +548,8 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
     progress = progress_line(status, program_count)
     status_id = f"{profile}-status"
     log_id = f"{profile}-log"
+    file_output_id = f"{profile}-file-output"
+    file_input_id = f"{profile}-file"
     manifest_line = "No completed local capture yet."
     if manifest:
         manifest_line = (
@@ -510,55 +560,65 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
         )
     return f"""
     <section class="card">
-      <h2>{escape(config["label"])}</h2>
+      <h2>{escape(config["label"])} branding capture</h2>
       <div class="meta">
         <span class="pill">Collector: {escape(str(status.get("status", "idle")))}</span>
         <span class="pill">Blob token: {"present" if token_present else "missing"}</span>
         <span class="pill">Progress: {escape(progress)}</span>
-        <span>Workbook: {escape(str(xlsx))}</span>
+        <span><strong>Current Excel report:</strong> {escape(str(xlsx))}</span>
         <span>Latest local: {manifest_line}</span>
       </div>
-      <ol class="steps">
-        <li>Click <strong>Open guided login</strong>.</li>
-        <li>Log into WebAdMIT, open CAS Configuration Portal, choose this CAS and cycle, then open 2 or 3 program Branding pages.</li>
-        <li>Close the Edge window. Guided login is done when status becomes <strong>completed</strong> and the log shows exit code 0.</li>
-        <li>Select the Excel export if needed, then click <strong>Capture and upload</strong>. Edge stays visible while it clicks through Program IDs.</li>
-      </ol>
-      <form method="post" action="{url_for('guide', profile=profile)}">
-        <div class="actions">
-          <button type="submit" class="secondary">1. Open guided login</button>
-        </div>
-      </form>
-      <form method="post" action="{url_for('upload_export', profile=profile)}" enctype="multipart/form-data">
-        <label for="{profile}-file">Choose Excel export</label>
-        <input id="{profile}-file" name="xlsx_file" type="file" accept=".xlsx,.xls">
-        <div class="actions">
-          <button type="submit" class="secondary">Use this Excel export</button>
-        </div>
-      </form>
-      <form method="post" action="{url_for('capture', profile=profile)}">
-        <label for="{profile}-xlsx">Excel export for this CAS</label>
-        <input id="{profile}-xlsx" name="xlsx" value="{escape(str(xlsx))}">
-        <label for="{profile}-delay">Delay per Program ID, ms</label>
-        <input id="{profile}-delay" name="delay_ms" value="4500">
-        <div class="actions">
-          <button type="submit">2. Capture and upload</button>
-        </div>
-      </form>
-      <form method="post" action="{url_for('upload_latest', profile=profile)}">
-        <div class="actions">
-          <button type="submit" class="secondary">Upload latest completed snapshot</button>
-        </div>
-      </form>
-      <p class="warn">Keep the browser profile logged into the correct CAS configuration portal before capture. Close the guided browser window when it is ready.</p>
+      <div class="step-card">
+        <h3>1. Select the Excel report</h3>
+        <p class="warn">Choose the configuration portal export for this CAS. After saving it here, the app shows the stored file path above and uses it for capture.</p>
+        <form method="post" action="{url_for('upload_export', profile=profile)}" enctype="multipart/form-data">
+          <label for="{file_input_id}">Excel export</label>
+          <input id="{file_input_id}" name="xlsx_file" type="file" accept=".xlsx,.xls" onchange="showChosenFile('{file_input_id}', '{file_output_id}')">
+          <div id="{file_output_id}" class="selected-file">No new file selected. Current file: {escape(str(xlsx))}</div>
+          <div class="actions">
+            <button type="submit" class="secondary">Save selected Excel report</button>
+          </div>
+        </form>
+      </div>
+      <div class="step-card">
+        <h3>2. Open guided login</h3>
+        <p class="warn">Edge will open. Log into WebAdMIT, go to CAS Configuration Portal, choose {escape(config["label"])} and the correct cycle, open Branding for 2 or 3 programs, then close the Edge window. Closing the window saves the login and trail.</p>
+        <form method="post" action="{url_for('guide', profile=profile)}">
+          <div class="actions">
+            <button type="submit" class="secondary">Open guided login</button>
+          </div>
+        </form>
+      </div>
+      <div class="step-card">
+        <h3>3. Capture and upload</h3>
+        <p class="warn">This opens Edge and visits every Program ID from the selected Excel report. It uploads automatically when capture finishes.</p>
+        <form method="post" action="{url_for('capture', profile=profile)}">
+          <label for="{profile}-xlsx">Excel report used for capture</label>
+          <input id="{profile}-xlsx" name="xlsx" value="{escape(str(xlsx))}">
+          <label for="{profile}-delay">Delay per Program ID, ms</label>
+          <input id="{profile}-delay" name="delay_ms" value="4500">
+          <div class="actions">
+            <button type="submit">Capture and upload</button>
+          </div>
+        </form>
+      </div>
+      <details class="step-card">
+        <summary><strong>Fallback: upload latest completed snapshot</strong></summary>
+        <p class="warn">Use this only if capture completed locally but the automatic upload did not finish. It does not recapture pages.</p>
+        <form method="post" action="{url_for('upload_latest', profile=profile)}">
+          <div class="actions">
+            <button type="submit" class="secondary">Upload latest completed snapshot</button>
+          </div>
+        </form>
+      </details>
       <div class="copy-row">
         <h3>Current Status</h3>
-        <button class="copy-button" type="button" onclick="copyText('{status_id}')">Copy</button>
+        <button class="copy-button" type="button" onclick="copyText('{status_id}', this)">Copy</button>
       </div>
       <pre id="{status_id}">{escape(json.dumps({"collector": status, "job": job, "progress": progress}, indent=2))}</pre>
       <div class="copy-row">
         <h3>Command Log</h3>
-        <button class="copy-button" type="button" onclick="copyText('{log_id}')">Copy</button>
+        <button class="copy-button" type="button" onclick="copyText('{log_id}', this)">Copy</button>
       </div>
       <pre id="{log_id}">{escape(log_text or "No command log yet.")}</pre>
     </section>
@@ -568,8 +628,13 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
 @app.get("/")
 def index() -> str:
     env = process_env()
-    cards = "\n".join(render_profile(profile, config, env) for profile, config in PROFILES.items())
+    active_profile = selected_profile()
+    cards = render_profile(active_profile, PROFILES[active_profile], env)
     token_status = blob_token_source(env)
+    profile_tabs = "\n".join(
+        f'<a class="{"active" if profile == active_profile else ""}" href="{url_for("index", profile=profile)}">{escape(config["label"])}</a>'
+        for profile, config in PROFILES.items()
+    )
     body = f"""
     <header>
       <div>
@@ -580,12 +645,23 @@ def index() -> str:
         uploads normalized branding JSON and images to Vercel Blob, and lets the deployed app read the latest snapshot.
       </p>
     </header>
+    <nav class="profile-tabs" aria-label="CAS profile">
+      {profile_tabs}
+    </nav>
     <section class="card" style="margin-bottom: 18px;">
-      <h2>Vercel Blob</h2>
+      <h2>Shared settings</h2>
       <div class="meta">
         <span class="pill">Blob token: {token_status}</span>
+        <span><strong>Prelaunch login URL:</strong> {escape(branding_login_url(env))}</span>
       </div>
-      <form method="post" action="{url_for('save_blob_token')}">
+      <form method="post" action="{url_for('save_prelaunch_url', profile=active_profile)}">
+        <label for="prelaunch-url">Prelaunch WebAdMIT URL</label>
+        <input id="prelaunch-url" name="prelaunch_url" value="{escape(branding_login_url(env))}">
+        <div class="actions">
+          <button type="submit" class="secondary">Save prelaunch URL</button>
+        </div>
+      </form>
+      <form method="post" action="{url_for('save_blob_token', profile=active_profile)}">
         <label for="blob-token">BLOB_READ_WRITE_TOKEN</label>
         <input id="blob-token" name="blob_token" type="password" placeholder="Paste token from Vercel Blob store">
         <div class="actions">
@@ -604,7 +680,15 @@ def save_blob_token():
     token = (request.form.get("blob_token") or "").strip()
     if token:
         save_env_value(REPO_ROOT / ".env.local", "BLOB_READ_WRITE_TOKEN", token)
-    return redirect(url_for("index"))
+    return profile_redirect(selected_profile())
+
+
+@app.post("/settings/prelaunch-url")
+def save_prelaunch_url():
+    value = (request.form.get("prelaunch_url") or "").strip()
+    if value:
+        save_env_value(REPO_ROOT / ".env.local", "BRANDING_LOGIN_URL", value)
+    return profile_redirect(selected_profile())
 
 
 @app.post("/guide/<profile>")
@@ -626,7 +710,7 @@ def guide(profile: str):
         "--non-interactive",
     ]
     start_thread(profile, "guide", command)
-    return redirect(url_for("index"))
+    return profile_redirect(profile)
 
 
 @app.post("/upload-export/<profile>")
@@ -636,11 +720,11 @@ def upload_export(profile: str):
     uploaded = request.files.get("xlsx_file")
     if not uploaded or not uploaded.filename:
         write_job(profile, status="error", message="No Excel file selected.", completedAt=utc_now())
-        return redirect(url_for("index"))
+        return profile_redirect(profile)
     filename = secure_filename(uploaded.filename)
     if not filename.lower().endswith((".xlsx", ".xls")):
         write_job(profile, status="error", message="Choose an .xlsx or .xls file.", completedAt=utc_now())
-        return redirect(url_for("index"))
+        return profile_redirect(profile)
     target_dir = UPLOAD_ROOT / profile
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / filename
@@ -652,7 +736,7 @@ def upload_export(profile: str):
         completedAt=utc_now(),
         message=f"Using Excel export: {target}",
     )
-    return redirect(url_for("index"))
+    return profile_redirect(profile)
 
 
 @app.post("/capture/<profile>")
@@ -669,7 +753,7 @@ def capture(profile: str):
         daemon=True,
     )
     thread.start()
-    return redirect(url_for("index"))
+    return profile_redirect(profile)
 
 
 @app.post("/upload-latest/<profile>")
@@ -678,7 +762,7 @@ def upload_latest(profile: str):
         return "Unknown profile", 404
     thread = threading.Thread(target=upload_latest_snapshot, args=(profile,), daemon=True)
     thread.start()
-    return redirect(url_for("index"))
+    return profile_redirect(profile)
 
 
 if __name__ == "__main__":
