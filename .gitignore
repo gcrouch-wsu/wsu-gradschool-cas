@@ -52,6 +52,7 @@ tools/branding/output/
 .branding-data/
 __pycache__/
 *.pyc
+branding.png
 
 # vercel
 .vercel

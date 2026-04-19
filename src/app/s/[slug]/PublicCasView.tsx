@@ -611,27 +611,31 @@ function BrandingPreviewCard({
           </span>
         </div>
       </div>
-      {branding.headerImageUrl ? (
-        <div className="border-b border-wsu-gray/10 bg-wsu-gray-dark">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={branding.headerImageUrl}
-            alt=""
-            className="max-h-64 w-full object-cover"
-          />
+      <div className="border-b border-wsu-gray/10 bg-wsu-gray-dark">
+        <div className="relative mx-auto max-w-[800px] overflow-hidden bg-wsu-gray-dark">
+          {branding.headerImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={branding.headerImageUrl}
+              alt=""
+              className="h-auto max-h-64 w-full object-cover"
+            />
+          ) : (
+            <div className="h-32 bg-wsu-gray-dark" />
+          )}
+          {branding.studentFacingTitle || branding.deadlineText ? (
+            <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center justify-between gap-3 bg-black/75 px-4 py-3 text-white">
+              <p className="min-w-0 flex-1 truncate text-sm font-semibold">
+                {branding.studentFacingTitle || "Student-facing branding"}
+              </p>
+              {branding.deadlineText ? (
+                <p className="shrink-0 text-sm font-semibold">{branding.deadlineText}</p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
       <div className="space-y-4 px-4 py-4">
-        {branding.studentFacingTitle || branding.deadlineText ? (
-          <div className="space-y-1">
-            {branding.studentFacingTitle ? (
-              <p className="text-lg font-semibold text-wsu-gray-dark">{branding.studentFacingTitle}</p>
-            ) : null}
-            {branding.deadlineText ? (
-              <p className="text-sm font-medium text-wsu-crimson">{branding.deadlineText}</p>
-            ) : null}
-          </div>
-        ) : null}
         {hasHtml ? (
           <div
             className="max-w-none whitespace-normal text-sm leading-relaxed text-wsu-gray-dark [&_a]:text-wsu-crimson [&_a]:underline [&_a]:decoration-wsu-crimson/30 [&_li]:ml-5 [&_li]:list-disc [&_ol]:ml-5 [&_ol]:list-decimal [&_p]:mb-3 [&_ul]:mb-3"
