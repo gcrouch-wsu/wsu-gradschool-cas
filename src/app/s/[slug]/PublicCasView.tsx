@@ -290,14 +290,6 @@ const BRANDING_BLOCK_RE =
   /<(p|li|h[1-6]|blockquote|div)(\s[^>]*)?>([\s\S]*?)<\/\1>/gi;
 const BRANDING_DIFF_CLASS = "rounded border-2 border-amber-300 bg-amber-50 px-2 py-1";
 
-function normalizeHtmlForComparison(value: string): string {
-  return value
-    .replace(/\s+/g, " ")
-    .replace(/\s+(?=>)/g, "")
-    .trim()
-    .toLowerCase();
-}
-
 function linksFingerprint(branding: ProgramBranding): string {
   return JSON.stringify(
     branding.links.map((link) => ({
@@ -309,7 +301,6 @@ function linksFingerprint(branding: ProgramBranding): string {
 
 type InstructionBlockSignature = {
   text: string;
-  html: string;
 };
 
 function instructionBlockSignatures(branding: ProgramBranding): InstructionBlockSignature[] {
@@ -320,7 +311,6 @@ function instructionBlockSignatures(branding: ProgramBranding): InstructionBlock
     if (text) {
       blocks.push({
         text,
-        html: normalizeHtmlForComparison(full),
       });
     }
     return full;
@@ -331,7 +321,6 @@ function instructionBlockSignatures(branding: ProgramBranding): InstructionBlock
     ? [
         {
           text: fallback,
-          html: fallback,
         },
       ]
     : [];
@@ -372,8 +361,7 @@ function brandingDifferenceMap(offerings: CasOffering[]): Map<string, BrandingDi
       branded.map((offering) => (offering.branding ? linksFingerprint(offering.branding) : ""))
     ).size > 1;
   const instructionBlocksByProgram = new Map<string, InstructionBlockSignature[]>();
-  const programsByText = new Map<string, Set<string>>();
-  const htmlByText = new Map<string, Set<string>>();
+  const countByText = new Map<string, number>();
   for (const offering of branded) {
     if (!offering.branding) continue;
     const blocks = instructionBlockSignatures(offering.branding);
@@ -381,17 +369,15 @@ function brandingDifferenceMap(offerings: CasOffering[]): Map<string, BrandingDi
     const seenTexts = new Set<string>();
     for (const block of blocks) {
       seenTexts.add(block.text);
-      if (!htmlByText.has(block.text)) htmlByText.set(block.text, new Set());
-      htmlByText.get(block.text)?.add(block.html);
     }
     for (const text of seenTexts) {
-      if (!programsByText.has(text)) programsByText.set(text, new Set());
-      programsByText.get(text)?.add(offering.programId);
+      countByText.set(text, (countByText.get(text) ?? 0) + 1);
     }
   }
+  const mostCommonBlockCount = Math.max(0, ...countByText.values());
   const differingInstructionTexts = new Set<string>();
-  for (const [text, programIds] of programsByText.entries()) {
-    if (programIds.size !== branded.length || (htmlByText.get(text)?.size ?? 0) > 1) {
+  for (const [text, count] of countByText.entries()) {
+    if (count < mostCommonBlockCount) {
       differingInstructionTexts.add(text);
     }
   }
