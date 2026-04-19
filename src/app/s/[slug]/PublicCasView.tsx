@@ -283,7 +283,7 @@ function normalizeForComparison(value: string | null | undefined): string {
 type BrandingDifferenceInfo = {
   deadlineDiffers: boolean;
   linkDiffers: boolean;
-  instructionBlockIndexes: Set<number>;
+  differingInstructionTexts: Set<string>;
 };
 
 const BRANDING_BLOCK_RE =
@@ -307,18 +307,34 @@ function linksFingerprint(branding: ProgramBranding): string {
   );
 }
 
-function instructionBlockFingerprints(branding: ProgramBranding): string[] {
+type InstructionBlockSignature = {
+  text: string;
+  html: string;
+};
+
+function instructionBlockSignatures(branding: ProgramBranding): InstructionBlockSignature[] {
   const safeHtml = sanitizeBrandingHtml(branding.instructionsHtml);
-  const blocks: string[] = [];
+  const blocks: InstructionBlockSignature[] = [];
   safeHtml.replace(BRANDING_BLOCK_RE, (full, _tag, _attrs, inner) => {
-    if (normalizeForComparison(inner)) {
-      blocks.push(normalizeHtmlForComparison(full));
+    const text = normalizeForComparison(inner);
+    if (text) {
+      blocks.push({
+        text,
+        html: normalizeHtmlForComparison(full),
+      });
     }
     return full;
   });
   if (blocks.length > 0) return blocks;
   const fallback = normalizeForComparison(branding.instructionsText || safeHtml);
-  return fallback ? [fallback] : [];
+  return fallback
+    ? [
+        {
+          text: fallback,
+          html: fallback,
+        },
+      ]
+    : [];
 }
 
 function withHighlightClass(openingTag: string): string {
@@ -330,14 +346,12 @@ function withHighlightClass(openingTag: string): string {
   return openingTag.replace(/>$/, ` class="${BRANDING_DIFF_CLASS}">`);
 }
 
-function highlightInstructionBlocks(html: string, indexes: Set<number>): string {
-  if (indexes.size === 0) return html;
-  let index = -1;
+function highlightInstructionBlocks(html: string, differingTexts: Set<string>): string {
+  if (differingTexts.size === 0) return html;
   let highlighted = false;
   const next = html.replace(BRANDING_BLOCK_RE, (full, tag, attrs = "", inner) => {
-    if (!normalizeForComparison(inner)) return full;
-    index += 1;
-    if (!indexes.has(index)) return full;
+    const text = normalizeForComparison(inner);
+    if (!text || !differingTexts.has(text)) return full;
     highlighted = true;
     const opening = withHighlightClass(`<${tag}${attrs}>`);
     return `${opening}${inner}</${tag}>`;
@@ -357,26 +371,35 @@ function brandingDifferenceMap(offerings: CasOffering[]): Map<string, BrandingDi
     new Set(
       branded.map((offering) => (offering.branding ? linksFingerprint(offering.branding) : ""))
     ).size > 1;
-  const instructionBlocksByProgram = new Map<string, string[]>();
-  let maxBlocks = 0;
+  const instructionBlocksByProgram = new Map<string, InstructionBlockSignature[]>();
+  const programsByText = new Map<string, Set<string>>();
+  const htmlByText = new Map<string, Set<string>>();
   for (const offering of branded) {
     if (!offering.branding) continue;
-    const blocks = instructionBlockFingerprints(offering.branding);
+    const blocks = instructionBlockSignatures(offering.branding);
     instructionBlocksByProgram.set(offering.programId, blocks);
-    maxBlocks = Math.max(maxBlocks, blocks.length);
+    const seenTexts = new Set<string>();
+    for (const block of blocks) {
+      seenTexts.add(block.text);
+      if (!htmlByText.has(block.text)) htmlByText.set(block.text, new Set());
+      htmlByText.get(block.text)?.add(block.html);
+    }
+    for (const text of seenTexts) {
+      if (!programsByText.has(text)) programsByText.set(text, new Set());
+      programsByText.get(text)?.add(offering.programId);
+    }
   }
-  const differingInstructionIndexes = new Set<number>();
-  for (let index = 0; index < maxBlocks; index += 1) {
-    const values = branded.map(
-      (offering) => instructionBlocksByProgram.get(offering.programId)?.[index] ?? "__missing__"
-    );
-    if (new Set(values).size > 1) differingInstructionIndexes.add(index);
+  const differingInstructionTexts = new Set<string>();
+  for (const [text, programIds] of programsByText.entries()) {
+    if (programIds.size !== branded.length || (htmlByText.get(text)?.size ?? 0) > 1) {
+      differingInstructionTexts.add(text);
+    }
   }
   for (const offering of branded) {
     differs.set(offering.programId, {
       deadlineDiffers,
       linkDiffers,
-      instructionBlockIndexes: differingInstructionIndexes,
+      differingInstructionTexts,
     });
   }
   return differs;
@@ -439,7 +462,7 @@ function ProgramDetail({
   );
   const hasBrandingDifferences = [...brandingDiffersByProgramId.values()].some(
     (info) =>
-      info.deadlineDiffers || info.linkDiffers || info.instructionBlockIndexes.size > 0
+      info.deadlineDiffers || info.linkDiffers || info.differingInstructionTexts.size > 0
   );
 
   return (
@@ -648,12 +671,12 @@ function BrandingPreviewCard({
   const hasHtml = safeHtml.trim().length > 0;
   const deadlineDiffers = brandingDifference?.deadlineDiffers === true;
   const linksDiffers = brandingDifference?.linkDiffers === true;
-  const instructionBlockIndexes =
-    brandingDifference?.instructionBlockIndexes ?? new Set<number>();
-  const highlightedHtml = highlightInstructionBlocks(safeHtml, instructionBlockIndexes);
+  const differingInstructionTexts =
+    brandingDifference?.differingInstructionTexts ?? new Set<string>();
+  const highlightedHtml = highlightInstructionBlocks(safeHtml, differingInstructionTexts);
   const differenceLabels = [
     deadlineDiffers ? "deadline" : "",
-    instructionBlockIndexes.size > 0 ? "instructions" : "",
+    differingInstructionTexts.size > 0 ? "instructions" : "",
     linksDiffers ? "links" : "",
   ].filter(Boolean);
 
