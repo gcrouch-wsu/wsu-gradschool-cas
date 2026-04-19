@@ -467,6 +467,7 @@ def page_shell(body: str) -> str:
     .pill {{ display: inline-flex; width: fit-content; border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; background: white; }}
     label {{ display: block; font: 700 12px/1.3 Verdana, sans-serif; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }}
     input {{ width: 100%; border: 1px solid var(--line); border-radius: 14px; padding: 11px 12px; background: #fffdf8; color: var(--ink); }}
+    input[type="file"].sr-only {{ position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }}
     .actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }}
     button, .button {{
       border: 0;
@@ -485,7 +486,8 @@ def page_shell(body: str) -> str:
     .profile-tabs {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 18px; }}
     .profile-tabs a {{ border: 1px solid var(--line); border-radius: 999px; padding: 10px 14px; background: white; color: var(--ink); font: 700 14px/1 Verdana, sans-serif; text-decoration: none; }}
     .profile-tabs a.active {{ background: var(--accent); border-color: var(--accent); color: white; }}
-    .selected-file {{ margin-top: 8px; border: 1px solid var(--line); border-radius: 14px; background: #fffdf8; padding: 10px 12px; color: var(--muted); font: 13px/1.45 Verdana, sans-serif; overflow-wrap: anywhere; }}
+    .file-picker {{ display: inline-flex; align-items: center; justify-content: center; width: fit-content; border-radius: 999px; background: var(--accent-2); color: white; padding: 11px 16px; cursor: pointer; font: 700 14px/1 Verdana, sans-serif; }}
+    .selected-file {{ margin-top: 10px; border: 1px solid #b2292e; border-radius: 14px; background: #fff6f6; padding: 11px 12px; color: var(--ink); font: 13px/1.45 Verdana, sans-serif; overflow-wrap: anywhere; }}
     .step-card {{ margin-top: 18px; border-top: 1px solid var(--line); padding-top: 18px; }}
     .step-card h3 {{ margin: 0 0 8px; font-size: 1.15rem; }}
     .steps {{ margin: 0; padding-left: 1.2rem; color: var(--muted); font: 15px/1.55 Verdana, sans-serif; }}
@@ -526,7 +528,7 @@ def page_shell(body: str) -> str:
       const output = document.getElementById(outputId);
       if (!input || !output) return;
       const file = input.files && input.files[0];
-      output.innerText = file ? `Selected: ${{file.name}} (${{Math.round(file.size / 1024)}} KB)` : "No file selected.";
+      output.innerText = file ? `Selected file: ${{file.name}} (${{Math.round(file.size / 1024)}} KB). Click Save selected Excel report to store it for capture.` : output.dataset.current || "No file selected.";
     }}
   </script>
 </head>
@@ -573,8 +575,9 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
         <p class="warn">Choose the configuration portal export for this CAS. After saving it here, the app shows the stored file path above and uses it for capture.</p>
         <form method="post" action="{url_for('upload_export', profile=profile)}" enctype="multipart/form-data">
           <label for="{file_input_id}">Excel export</label>
-          <input id="{file_input_id}" name="xlsx_file" type="file" accept=".xlsx,.xls" onchange="showChosenFile('{file_input_id}', '{file_output_id}')">
-          <div id="{file_output_id}" class="selected-file">No new file selected. Current file: {escape(str(xlsx))}</div>
+          <label class="file-picker" for="{file_input_id}">Choose Excel report</label>
+          <input class="sr-only" id="{file_input_id}" name="xlsx_file" type="file" accept=".xlsx,.xls" onchange="showChosenFile('{file_input_id}', '{file_output_id}')">
+          <div id="{file_output_id}" class="selected-file" data-current="Current saved report: {escape(str(xlsx))}">Current saved report: {escape(str(xlsx))}</div>
           <div class="actions">
             <button type="submit" class="secondary">Save selected Excel report</button>
           </div>
@@ -593,8 +596,7 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
         <h3>3. Capture and upload</h3>
         <p class="warn">This opens Edge and visits every Program ID from the selected Excel report. It uploads automatically when capture finishes.</p>
         <form method="post" action="{url_for('capture', profile=profile)}">
-          <label for="{profile}-xlsx">Excel report used for capture</label>
-          <input id="{profile}-xlsx" name="xlsx" value="{escape(str(xlsx))}">
+          <input type="hidden" name="xlsx" value="{escape(str(xlsx))}">
           <label for="{profile}-delay">Delay per Program ID, ms</label>
           <input id="{profile}-delay" name="delay_ms" value="4500">
           <div class="actions">
