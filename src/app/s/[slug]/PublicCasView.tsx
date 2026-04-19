@@ -15,6 +15,7 @@ import {
   getRecordValueCi,
   unionRowKeysWithData,
 } from "@/lib/record-key";
+import { sanitizeBrandingHtml } from "@/lib/sanitize-branding-html";
 import type {
   CasOffering,
   PublicProgramGroup,
@@ -378,6 +379,26 @@ function ProgramDetail({
         </section>
       )}
 
+      {group.offerings.some((o) => o.branding) && (
+        <section className="space-y-3">
+          {sectionTitle("Student-facing branding")}
+          <p className="text-sm text-wsu-gray">
+            Branding is linked by CAS Program ID so coordinators can review the same header image
+            and HTML instructions applicants see.
+          </p>
+          <div className="space-y-4">
+            {group.offerings.map((o) => (
+              <BrandingPreviewCard
+                key={`branding-${o.programId}`}
+                offering={o}
+                termFieldSettings={termFieldSettings}
+                showProgramIdOnPublic={showProgramIdOnPublic}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="space-y-3">
         {sectionTitle("Recommendations")}
         {group.recommendationNote && (
@@ -467,6 +488,110 @@ function ProgramDetail({
         )}
       </section>
     </article>
+  );
+}
+
+function BrandingPreviewCard({
+  offering,
+  termFieldSettings,
+  showProgramIdOnPublic,
+}: {
+  offering: CasOffering;
+  termFieldSettings: TermFieldSetting[];
+  showProgramIdOnPublic: boolean;
+}) {
+  const branding = offering.branding;
+  const titleLine = applicationWindowCardTitle(offering, termFieldSettings);
+  if (!branding) {
+    return (
+      <div className="rounded-lg border border-dashed border-wsu-gray/20 bg-wsu-cream/20 px-4 py-4">
+        <p className="text-sm font-semibold text-wsu-gray-dark">{titleLine}</p>
+        {showProgramIdOnPublic ? (
+          <p className="mt-1 text-xs text-wsu-gray">Program ID: {offering.programId}</p>
+        ) : null}
+        <p className="mt-2 text-sm text-wsu-gray">No branding snapshot found for this Program ID.</p>
+      </div>
+    );
+  }
+
+  const safeHtml = sanitizeBrandingHtml(branding.instructionsHtml);
+  const emptyShell = branding.status === "empty_shell";
+  const hasHtml = safeHtml.trim().length > 0;
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-wsu-gray/10 bg-white shadow-sm">
+      <div className="border-b border-wsu-gray/10 bg-wsu-cream/40 px-4 py-3">
+        <p className="text-base font-semibold text-wsu-gray-dark">{titleLine}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-wsu-gray">
+          {showProgramIdOnPublic ? <span>Program ID: {offering.programId}</span> : null}
+          <span>Profile: {branding.sourceProfile}</span>
+          <span>Captured: {new Date(branding.capturedAt).toLocaleString()}</span>
+          <span
+            className={`rounded-full px-2 py-0.5 font-semibold ${
+              branding.status === "ok"
+                ? "bg-emerald-100 text-emerald-800"
+                : branding.status === "empty_shell"
+                  ? "bg-amber-100 text-amber-900"
+                  : "bg-red-100 text-red-800"
+            }`}
+          >
+            {branding.status}
+          </span>
+        </div>
+      </div>
+      {branding.headerImageUrl ? (
+        <div className="border-b border-wsu-gray/10 bg-wsu-gray-dark">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={branding.headerImageUrl}
+            alt=""
+            className="max-h-64 w-full object-cover"
+          />
+        </div>
+      ) : null}
+      <div className="space-y-4 px-4 py-4">
+        {branding.studentFacingTitle || branding.deadlineText ? (
+          <div className="space-y-1">
+            {branding.studentFacingTitle ? (
+              <p className="text-lg font-semibold text-wsu-gray-dark">{branding.studentFacingTitle}</p>
+            ) : null}
+            {branding.deadlineText ? (
+              <p className="text-sm font-medium text-wsu-crimson">{branding.deadlineText}</p>
+            ) : null}
+          </div>
+        ) : null}
+        {hasHtml ? (
+          <div
+            className="max-w-none whitespace-normal text-sm leading-relaxed text-wsu-gray-dark [&_a]:text-wsu-crimson [&_a]:underline [&_a]:decoration-wsu-crimson/30 [&_li]:ml-5 [&_li]:list-disc [&_ol]:ml-5 [&_ol]:list-decimal [&_p]:mb-3 [&_ul]:mb-3"
+            dangerouslySetInnerHTML={{ __html: safeHtml }}
+          />
+        ) : emptyShell ? (
+          <p className="text-sm text-amber-900">
+            This Program ID resolved to an empty branding shell during capture.
+          </p>
+        ) : (
+          <p className="text-sm text-wsu-gray">
+            No branding HTML was captured for this Program ID.
+          </p>
+        )}
+        {branding.links.length > 0 && !hasHtml ? (
+          <ul className="list-disc space-y-1 pl-5 text-sm text-wsu-gray-dark">
+            {branding.links.map((link, index) => (
+              <li key={`${link.href}-${index}`}>
+                <a
+                  href={link.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-wsu-crimson underline decoration-wsu-crimson/30"
+                >
+                  {link.text || link.href}
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

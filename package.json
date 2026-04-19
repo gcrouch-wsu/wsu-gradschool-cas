@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "branding:login": "node tools/branding/cli.mjs guide",
+    "branding:record": "node tools/branding/cli.mjs record",
+    "branding:export": "node tools/branding/cli.mjs export",
+    "branding:upload": "node tools/branding/upload-snapshot.mjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.3.3",
@@ -25,6 +29,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
+    "playwright": "^1.59.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

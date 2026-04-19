@@ -36,6 +36,47 @@ type ConfigResponse = {
   sourceFileName: string;
 };
 
+type BrandingAdminResponse = {
+  currentCoverage: {
+    totalOfferings: number;
+    brandedOfferings: number;
+    emptyShellOfferings: number;
+  };
+  currentSnapshotId: string | null;
+  currentProfiles: string[];
+  branding: {
+    rootDir: string;
+    profiles: {
+      profile: string;
+      authPath: string;
+      trailPath: string;
+      status: {
+        profile: string;
+        status: "idle" | "running" | "completed" | "error";
+        mode?: "guide" | "export";
+        startedAt?: string;
+        updatedAt?: string;
+        completedAt?: string;
+        message?: string;
+        snapshotId?: string;
+        totalPrograms?: number;
+        completedPrograms?: number;
+        okPrograms?: number;
+        emptyShellPrograms?: number;
+        errorPrograms?: number;
+      };
+      latestSnapshot: {
+        snapshotId: string;
+        createdAt: string;
+        totalPrograms?: number;
+        okPrograms?: number;
+        emptyShellPrograms?: number;
+        errorPrograms?: number;
+      } | null;
+    }[];
+  };
+};
+
 function parseProgramStripLines(s: string): string[] {
   return s
     .split(/\r?\n/)
@@ -98,6 +139,8 @@ export default function AdminPublicationPage() {
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
   const [settingsImportBusy, setSettingsImportBusy] = useState(false);
   const [settingsImportMessage, setSettingsImportMessage] = useState<string | null>(null);
+  const [branding, setBranding] = useState<BrandingAdminResponse | null>(null);
+  const [brandingBusyProfile, setBrandingBusyProfile] = useState<string | null>(null);
 
   const applyConfig = useCallback((c: ConfigResponse) => {
     setSaved(c);
@@ -147,9 +190,36 @@ export default function AdminPublicationPage() {
     setLoading(false);
   }, [slug, router, applyConfig]);
 
+  const loadBranding = useCallback(async () => {
+    if (!slug) return;
+    const res = await fetch(`/api/admin/publications/${slug}/branding`, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (res.status === 401) {
+      router.push(`/admin/login?next=${encodeURIComponent(`/admin/${slug}`)}`);
+      return;
+    }
+    const raw = await res.text();
+    if (!raw.trim()) return;
+    const body = JSON.parse(raw) as BrandingAdminResponse;
+    if (res.ok) {
+      setBranding(body);
+    }
+  }, [slug, router]);
+
   useEffect(() => {
     void loadConfig();
-  }, [loadConfig]);
+    void loadBranding();
+  }, [loadConfig, loadBranding]);
+
+  useEffect(() => {
+    if (!branding?.branding.profiles.some((p) => p.status.status === "running")) return;
+    const timer = window.setInterval(() => {
+      void loadBranding();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [branding, loadBranding]);
 
   const dirty = useMemo(() => {
     if (!saved) return false;
@@ -196,6 +266,36 @@ export default function AdminPublicationPage() {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     router.push("/admin/login");
     router.refresh();
+  }
+
+  async function runBrandingAction(profile: string, action: "guide" | "export") {
+    setBrandingBusyProfile(`${profile}:${action}`);
+    setError(null);
+    setSaveMessage(null);
+    try {
+      const res = await fetch(`/api/admin/publications/${slug}/branding`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile, action }),
+      });
+      if (res.status === 401) {
+        router.push(`/admin/login?next=${encodeURIComponent(`/admin/${slug}`)}`);
+        return;
+      }
+      const raw = await res.text();
+      const body = raw.trim() ? (JSON.parse(raw) as { error?: string; message?: string }) : {};
+      if (!res.ok) {
+        setError(body.error ?? "Branding action failed");
+        return;
+      }
+      setSaveMessage(body.message ?? "Branding action started.");
+      await loadBranding();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Branding action failed");
+    } finally {
+      setBrandingBusyProfile(null);
+    }
   }
 
   async function saveAll() {
@@ -664,6 +764,132 @@ export default function AdminPublicationPage() {
             </div>
             {mergeMessage && (
               <p className="mt-3 text-sm text-emerald-800">{mergeMessage}</p>
+            )}
+          </section>
+
+          <section className="rounded-xl border border-wsu-gray/15 bg-white p-5 shadow-sm">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-wsu-gray">
+              Branding Capture
+            </h2>
+            <p className="mt-2 text-sm text-wsu-gray">
+              Branding is joined to this publication by <strong className="text-wsu-gray-dark">Program ID</strong>.
+              Run the profile-specific capture here, then use the public page to review the student-facing
+              HTML branding preview beside the flattened export data.
+            </p>
+            {branding ? (
+              <>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border border-wsu-gray/10 bg-wsu-cream/40 px-3 py-3">
+                    <p className="text-xs font-medium text-wsu-gray">Offerings in publication</p>
+                    <p className="mt-1 text-lg font-semibold text-wsu-gray-dark">
+                      {branding.currentCoverage.totalOfferings}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
+                    <p className="text-xs font-medium text-emerald-900">Offerings with branding</p>
+                    <p className="mt-1 text-lg font-semibold text-emerald-900">
+                      {branding.currentCoverage.brandedOfferings}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+                    <p className="text-xs font-medium text-amber-950">Empty shell captures</p>
+                    <p className="mt-1 text-lg font-semibold text-amber-950">
+                      {branding.currentCoverage.emptyShellOfferings}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs text-wsu-gray">
+                  Active snapshot:{" "}
+                  <span className="font-mono text-wsu-gray-dark">
+                    {branding.currentSnapshotId ?? "none"}
+                  </span>
+                </p>
+                <div className="mt-5 space-y-4">
+                  {branding.branding.profiles.map((profileRow) => (
+                    <div
+                      key={profileRow.profile}
+                      className="rounded-lg border border-wsu-gray/10 bg-wsu-cream/25 px-4 py-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-wsu-gray-dark">
+                            {profileRow.profile}
+                          </p>
+                          <p className="mt-1 text-xs text-wsu-gray">
+                            Auth: <span className="font-mono">{profileRow.authPath}</span>
+                          </p>
+                          <p className="mt-1 text-xs text-wsu-gray">
+                            Trail: <span className="font-mono">{profileRow.trailPath}</span>
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={brandingBusyProfile !== null}
+                            onClick={() => void runBrandingAction(profileRow.profile, "guide")}
+                            className="rounded-lg border border-wsu-gray/25 bg-white px-3 py-2 text-sm font-semibold text-wsu-gray-dark shadow-sm hover:bg-wsu-cream disabled:opacity-50"
+                          >
+                            {brandingBusyProfile === `${profileRow.profile}:guide`
+                              ? "Launching…"
+                              : "Guide login"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={brandingBusyProfile !== null}
+                            onClick={() => void runBrandingAction(profileRow.profile, "export")}
+                            className="rounded-lg bg-wsu-crimson px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-wsu-crimson-dark disabled:opacity-50"
+                          >
+                            {brandingBusyProfile === `${profileRow.profile}:export`
+                              ? "Starting…"
+                              : "Capture branding"}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-wsu-gray">
+                        <span
+                          className={`rounded-full px-2 py-0.5 font-semibold ${
+                            profileRow.status.status === "completed"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : profileRow.status.status === "running"
+                                ? "bg-sky-100 text-sky-800"
+                                : profileRow.status.status === "error"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-wsu-gray/10 text-wsu-gray-dark"
+                          }`}
+                        >
+                          {profileRow.status.status}
+                        </span>
+                        {profileRow.status.mode ? <span>mode: {profileRow.status.mode}</span> : null}
+                        {profileRow.status.message ? <span>{profileRow.status.message}</span> : null}
+                        {profileRow.status.completedPrograms !== undefined &&
+                        profileRow.status.totalPrograms !== undefined ? (
+                          <span>
+                            {profileRow.status.completedPrograms}/{profileRow.status.totalPrograms} Program IDs
+                          </span>
+                        ) : null}
+                      </div>
+                      {profileRow.latestSnapshot ? (
+                        <p className="mt-2 text-xs text-wsu-gray">
+                          Latest snapshot:{" "}
+                          <span className="font-mono text-wsu-gray-dark">
+                            {profileRow.latestSnapshot.snapshotId}
+                          </span>
+                          {" · "}
+                          ok {profileRow.latestSnapshot.okPrograms ?? 0}
+                          {" · "}
+                          empty {profileRow.latestSnapshot.emptyShellPrograms ?? 0}
+                          {" · "}
+                          error {profileRow.latestSnapshot.errorPrograms ?? 0}
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-xs text-wsu-gray">No completed snapshot yet.</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="mt-3 text-sm text-wsu-gray">Loading branding status…</p>
             )}
           </section>
 

@@ -6,6 +6,7 @@ import type {
   TermFieldSetting,
 } from "./types";
 import { getBlobAccessMode } from "./blob-access";
+import { mergeLatestBrandingIntoPublicationData } from "./branding-store";
 import {
   DEFAULT_PUBLIC_HEADER_SUBTITLE,
   DEFAULT_PUBLIC_HEADER_TITLE,
@@ -29,6 +30,7 @@ import {
 
 const BLOB_PREFIX = "cas-publications";
 const CURRENT_VIEW_PATHNAME = `${BLOB_PREFIX}/_current-view.json`;
+const DEFAULT_BRANDING_PROFILES = ["gradcas", "engineeringcas"];
 
 /** Stored as one JSON file per publication in Vercel Blob. */
 export type StoredPublicationBlob = {
@@ -229,6 +231,19 @@ function mapToPublicGroup(
   };
 }
 
+function stripLocalBrandingData(data: CasPublicationData): CasPublicationData {
+  return {
+    ...data,
+    brandingSnapshotId: undefined,
+    brandingProfiles: undefined,
+    brandingCoverage: undefined,
+    groups: data.groups.map((group) => ({
+      ...group,
+      offerings: group.offerings.map(({ branding: _branding, ...offering }) => offering),
+    })),
+  };
+}
+
 export function toPublicPayload(row: PublicationRow): PublicPublicationPayload {
   const data = row.data;
   const keys = row.visible_columns ?? [];
@@ -287,7 +302,15 @@ export async function getPublicationBySlug(
     if (parsed.version !== 1 || parsed.slug !== slug) {
       return null;
     }
-    return blobToRow(parsed);
+    const row = blobToRow(parsed);
+    const dataWithBranding = await mergeLatestBrandingIntoPublicationData(
+      row.data,
+      DEFAULT_BRANDING_PROFILES
+    );
+    return {
+      ...row,
+      data: dataWithBranding,
+    };
   } catch {
     return null;
   }
@@ -501,7 +524,7 @@ export async function updatePublication(
     visible_answer_columns,
     visible_document_columns,
     term_field_settings,
-    data: existing.data,
+    data: stripLocalBrandingData(existing.data),
     created_at: existing.created_at,
     updated_at: now,
   };
@@ -580,7 +603,7 @@ export async function mergePublicationFromUpload(
     public_hero_eyebrow: existing.public_hero_eyebrow,
     public_hero_body: existing.public_hero_body,
     program_display_name_strip_suffixes: existing.program_display_name_strip_suffixes,
-    data: merged,
+    data: stripLocalBrandingData(merged),
     created_at: existing.created_at,
     updated_at: now,
   };

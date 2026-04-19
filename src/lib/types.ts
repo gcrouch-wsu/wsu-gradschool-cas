@@ -7,8 +7,27 @@ export interface TermFieldSetting {
   key: string;
   label: string;
   visible: boolean;
-  /** When true, this field’s value is included in the application window card title (e.g. Start Term · Start Year). */
+  /** When true, this field's value is included in the application window card title (e.g. Start Term · Start Year). */
   show_in_heading?: boolean;
+}
+
+export interface ProgramBrandingLink {
+  text: string;
+  href: string;
+}
+
+export interface ProgramBranding {
+  programId: string;
+  sourceProfile: string;
+  capturedAt: string;
+  status: "ok" | "empty_shell" | "error";
+  studentFacingTitle: string;
+  deadlineText: string;
+  headerImageUrl: string | null;
+  instructionsHtml: string;
+  instructionsText: string;
+  links: ProgramBrandingLink[];
+  pageUrl: string;
 }
 
 export interface CasOffering {
@@ -19,6 +38,7 @@ export interface CasOffering {
   varying: Record<string, string>;
   /** Ordered term / date fields for public bullets (from Program Attributes row). */
   termParts: { key: string; value: string }[];
+  branding?: ProgramBranding | null;
 }
 
 /** Recommendation sheet values for one CAS Program ID, labeled for public display when terms differ. */
@@ -36,7 +56,7 @@ export interface CasProgramGroup {
   offerings: CasOffering[];
   recommendations: Record<string, string> | null;
   recommendationNote?: string;
-  /** When set, `recommendations` is only a fallback; show each row’s `values` under its `windowLabel`. */
+  /** When set, `recommendations` is only a fallback; show each row's `values` under its `windowLabel`. */
   recommendationRows?: RecommendationByOffering[];
   questions: Record<string, string>[];
   documents: Record<string, string>[];
@@ -53,6 +73,13 @@ export interface CasPublicationData {
   questionColumnOptions: string[];
   answerColumnOptions: string[];
   documentColumnOptions: string[];
+  brandingSnapshotId?: string;
+  brandingProfiles?: string[];
+  brandingCoverage?: {
+    totalOfferings: number;
+    brandedOfferings: number;
+    emptyShellOfferings: number;
+  };
 }
 
 export interface PublicPublicationPayload {

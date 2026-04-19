@@ -42,9 +42,14 @@ yarn-error.log*
 .env*.local
 .env
 .env.gradcas
+.env.branding
 gradcas-response*.json
 gradcas-response*.txt
+cas-publication-settings-*.json
 tools/gradcas/.cache/
+tools/branding/.auth/
+tools/branding/output/
+.branding-data/
 __pycache__/
 *.pyc
 
