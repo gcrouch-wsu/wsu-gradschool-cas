@@ -256,6 +256,44 @@ function offeringWindowLabel(o: CasOffering): string {
   return pid ? `Program ID ${pid}` : "—";
 }
 
+/** Stable comparison of CAS recommendation *policy*: Evaluation Type, Min, Max, Minimum Required. */
+function recommendationPolicyFingerprint(rec: Record<string, string>): string {
+  const find = (pred: (k: string) => boolean): string => {
+    for (const [k, v] of Object.entries(rec)) {
+      if (pred(k)) return String(v ?? "").trim();
+    }
+    return "";
+  };
+  const evalType = find((k) => k.trim().toLowerCase() === "evaluation type");
+  const min = find((k) => k.trim().toLowerCase() === "min");
+  const max = find((k) => k.trim().toLowerCase() === "max");
+  const minReq = find((k) => /minimum\s+required/i.test(k));
+  const normText = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+  const normNum = (s: string) => {
+    const t = normText(s);
+    const m = t.match(/-?\d+(?:\.\d+)?/);
+    return m ? m[0] : t;
+  };
+  const normYn = (s: string) => {
+    const t = normText(s);
+    if (t === "y" || t === "yes" || t === "true" || t === "1") return "y";
+    if (t === "n" || t === "no" || t === "false" || t === "0") return "n";
+    return t;
+  };
+  return JSON.stringify({
+    et: normText(evalType),
+    min: normNum(min),
+    max: normNum(max),
+    req: normYn(minReq),
+  });
+}
+
+function recommendationPolicyDiffersAcrossRows(rows: RecommendationByOffering[]): boolean {
+  if (rows.length < 2) return false;
+  const fps = rows.map((r) => recommendationPolicyFingerprint(r.values));
+  return new Set(fps).size > 1;
+}
+
 function mergeRecommendationForGroup(
   offerings: CasOffering[],
   recMap: Map<string, Record<string, string>>
@@ -263,6 +301,7 @@ function mergeRecommendationForGroup(
   rec: Record<string, string> | null;
   note?: string;
   recommendationRows?: RecommendationByOffering[];
+  recommendationPolicyDiffersByWindow: boolean;
 } {
   const payloads: { id: string; rec: Record<string, string> }[] = [];
   for (const o of offerings) {
@@ -271,10 +310,17 @@ function mergeRecommendationForGroup(
     const rec = recMap.get(id);
     if (rec && Object.values(rec).some(Boolean)) payloads.push({ id, rec });
   }
-  if (payloads.length === 0) return { rec: null };
+  if (payloads.length === 0) {
+    return { rec: null, recommendationPolicyDiffersByWindow: false };
+  }
+  const policyDiffers =
+    payloads.length >= 2 &&
+    new Set(payloads.map((p) => recommendationPolicyFingerprint(p.rec))).size > 1;
   const canon = JSON.stringify(payloads[0].rec);
   const allSame = payloads.every((p) => JSON.stringify(p.rec) === canon);
-  if (allSame) return { rec: payloads[0].rec };
+  if (allSame) {
+    return { rec: payloads[0].rec, recommendationPolicyDiffersByWindow: false };
+  }
   const recommendationRows: RecommendationByOffering[] = payloads.map(({ id, rec }) => {
     const offering = offerings.find((x) => cleanProgramId(x.programId) === id);
     const windowLabel = offering ? offeringWindowLabel(offering) : id;
@@ -284,6 +330,7 @@ function mergeRecommendationForGroup(
     rec: payloads[0].rec,
     note: "Recommendation settings differ by application window; each window is listed below.",
     recommendationRows,
+    recommendationPolicyDiffersByWindow: policyDiffers,
   };
 }
 
@@ -447,33 +494,39 @@ function mergeGroupRecommendations(
   rec: Record<string, string> | null;
   note?: string;
   recommendationRows?: RecommendationByOffering[];
+  recommendationPolicyDiffersByWindow: boolean;
 } {
   const mergedRows = mergeRecommendationRows(
     existing.recommendationRows,
     incoming.recommendationRows
   );
   if (mergedRows && mergedRows.length > 0) {
+    const policyDiffers = recommendationPolicyDiffersAcrossRows(mergedRows);
     const uniqueValues = new Set(mergedRows.map((r) => JSON.stringify(r.values)));
     if (uniqueValues.size <= 1) {
       return {
         rec: mergedRows[0].values,
         note: existing.recommendationNote ?? incoming.recommendationNote,
+        recommendationPolicyDiffersByWindow: policyDiffers,
       };
     }
     return {
       rec: mergedRows[0].values,
       note: "Recommendation settings differ by application window or between merged CAS exports; each window is listed below.",
       recommendationRows: mergedRows,
+      recommendationPolicyDiffersByWindow: policyDiffers,
     };
   }
 
   const a = existing.recommendations;
   const b = incoming.recommendations;
-  if (!a && !b) return { rec: null };
+  if (!a && !b) return { rec: null, recommendationPolicyDiffersByWindow: false };
   if (a && !b) {
     return {
       rec: a,
       note: existing.recommendationNote,
+      recommendationPolicyDiffersByWindow:
+        existing.recommendationPolicyDiffersByWindow ?? false,
       ...(existing.recommendationRows?.length
         ? { recommendationRows: existing.recommendationRows }
         : {}),
@@ -483,6 +536,8 @@ function mergeGroupRecommendations(
     return {
       rec: b,
       note: incoming.recommendationNote,
+      recommendationPolicyDiffersByWindow:
+        incoming.recommendationPolicyDiffersByWindow ?? false,
       ...(incoming.recommendationRows?.length
         ? { recommendationRows: incoming.recommendationRows }
         : {}),
@@ -498,17 +553,21 @@ function mergeGroupRecommendations(
           rec: a,
           note: existing.recommendationNote ?? incoming.recommendationNote,
           recommendationRows: rows,
+          recommendationPolicyDiffersByWindow: recommendationPolicyDiffersAcrossRows(rows),
         };
       }
     }
     return {
       rec: a,
       note: existing.recommendationNote ?? incoming.recommendationNote,
+      recommendationPolicyDiffersByWindow: false,
     };
   }
   return {
     rec: a,
     note: "Recommendation settings differ between merged CAS exports for this program group; values shown are from the first export. Confirm in CAS.",
+    recommendationPolicyDiffersByWindow:
+      recommendationPolicyFingerprint(a ?? {}) !== recommendationPolicyFingerprint(b ?? {}),
   };
 }
 
@@ -551,6 +610,11 @@ export function mergePublicationData(
     ex.recommendationNote = mergedRec.note;
     if (mergedRec.recommendationRows?.length) ex.recommendationRows = mergedRec.recommendationRows;
     else delete ex.recommendationRows;
+    if (mergedRec.recommendationPolicyDiffersByWindow) {
+      ex.recommendationPolicyDiffersByWindow = true;
+    } else {
+      delete ex.recommendationPolicyDiffersByWindow;
+    }
   }
   const mergedGroups = [...map.values()].sort((x, y) =>
     x.displayName.localeCompare(y.displayName, undefined, { sensitivity: "base" })
@@ -616,7 +680,8 @@ function buildGroupsFromSheets(params: {
       aAccum.push(...rowsForProgram(answersAll, pid));
     }
 
-    const { rec, note, recommendationRows } = mergeRecommendationForGroup(offerings, recMap);
+    const { rec, note, recommendationRows, recommendationPolicyDiffersByWindow } =
+      mergeRecommendationForGroup(offerings, recMap);
 
     groups.push({
       groupKey: groupKey(rows[0]),
@@ -626,6 +691,9 @@ function buildGroupsFromSheets(params: {
       recommendations: rec,
       recommendationNote: note,
       recommendationRows,
+      ...(recommendationPolicyDiffersByWindow
+        ? { recommendationPolicyDiffersByWindow: true }
+        : {}),
       questions: dedupeQuestions(qAccum),
       documents: dedupeDocuments(dAccum),
       answers: dedupeAnswers(aAccum),

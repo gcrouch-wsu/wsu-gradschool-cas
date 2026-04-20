@@ -7,6 +7,7 @@ import {
   augmentDetailRowsWithApplicationWindow,
   collapseAugmentedDetailRowsByMatchingContent,
   detailTableApplicationWindowLabel,
+  mapTermPartKeyToPublicLabel,
   prependApplicationWindowColumn,
 } from "@/lib/application-window-label";
 import { linkifyHeroSegment } from "@/lib/hero-linkify";
@@ -488,18 +489,21 @@ function termSettingMap(settings: TermFieldSetting[]): Map<string, TermFieldSett
   return new Map(settings.map((s) => [s.key, s]));
 }
 
-function visibleTermBullets(o: CasOffering, settings: TermFieldSetting[]) {
+type TermBullet = { label: string; value: string; hint?: string };
+
+function visibleTermBullets(o: CasOffering, settings: TermFieldSetting[]): TermBullet[] {
   const map = termSettingMap(settings);
   return o.termParts
-    .map((p) => {
+    .map((p): TermBullet | null => {
       const s = map.get(p.key);
       const visible = s ? s.visible : true;
       if (!visible) return null;
       if (s?.show_in_heading) return null;
-      const label = (s?.label ?? p.key).trim() || p.key;
-      return { label, value: p.value };
+      const fallbackLabel = (s?.label ?? p.key).trim() || p.key;
+      const { label, hint } = mapTermPartKeyToPublicLabel(p.key, fallbackLabel);
+      return { label, value: p.value, ...(hint ? { hint } : {}) };
     })
-    .filter((x): x is { label: string; value: string } => x !== null);
+    .filter((x): x is TermBullet => x !== null);
 }
 
 function normalizeForComparison(value: string | null | undefined): string {
@@ -735,11 +739,18 @@ function ProgramDetail({
                     <p className="mt-1 text-xs text-wsu-gray">Program ID: {o.programId}</p>
                   )}
                   {bullets.length > 0 ? (
-                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                    <ul className="mt-2 list-none space-y-2 pl-0 text-sm">
                       {bullets.map((b, i) => (
                         <li key={`${o.programId}-${i}`}>
-                          <span className="font-medium text-wsu-gray-dark">{b.label}: </span>
-                          <span className="text-wsu-gray-dark">{b.value || "—"}</span>
+                          <div>
+                            <span className="font-medium text-wsu-gray-dark">{b.label}: </span>
+                            <span className="text-wsu-gray-dark">{b.value || "—"}</span>
+                          </div>
+                          {b.hint ? (
+                            <p className="mt-0.5 text-xs italic leading-snug text-wsu-gray">
+                              {b.hint}
+                            </p>
+                          ) : null}
                         </li>
                       ))}
                     </ul>
@@ -814,6 +825,13 @@ function ProgramDetail({
 
       <section className="space-y-3">
         {sectionTitle("Recommendations")}
+        {group.recommendationPolicyDiffersByWindow ? (
+          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <span className="font-semibold">Coordinator note: </span>
+            Recommendation policy (evaluation type, min/max counts, and minimum required for
+            submission) differs across application windows—confirm details in CAS.
+          </p>
+        ) : null}
         {group.recommendationNote && (
           <p className="rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2 text-sm text-amber-950">
             {group.recommendationNote}

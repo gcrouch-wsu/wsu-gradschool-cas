@@ -73,6 +73,33 @@ const FALLBACK_TERM_KEYS = [
   "Updated Date",
 ] as const;
 
+/** Public-facing labels aligned with WebAdMIT; optional hint under Display / Default deadline rows. */
+export function mapTermPartKeyToPublicLabel(
+  fieldKey: string,
+  fallbackLabel: string
+): { label: string; hint?: string } {
+  const k = fieldKey.trim().toLowerCase();
+  if (k === "application deadline") {
+    return {
+      label: "Display deadline",
+      hint: 'What applicants see in the portal (may match the default deadline, be earlier, or "Rolling").',
+    };
+  }
+  if (k === "deadline") {
+    return {
+      label: "Default deadline",
+      hint: "Last day the program accepts applications in the CAS Applicant Portal.",
+    };
+  }
+  if (k === "open date") {
+    return { label: "Open date" };
+  }
+  if (k === "updated date") {
+    return { label: "Last updated" };
+  }
+  return { label: fallbackLabel };
+}
+
 /** When nothing is “In title”, still show term-like fields so Fall/Spring are visible. */
 export function applicationWindowFallbackFromTermParts(o: CasOffering): string | null {
   const map = new Map(o.termParts.map((p) => [p.key, p.value]));

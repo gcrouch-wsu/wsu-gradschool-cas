@@ -323,6 +323,7 @@ function mapToPublicGroup(
     recommendations: g.recommendations,
     recommendationNote: g.recommendationNote,
     recommendationRows: g.recommendationRows,
+    recommendationPolicyDiffersByWindow: g.recommendationPolicyDiffersByWindow,
     questions: filterRecordRows(g.questions, questionKeys),
     documents: filterRecordRows(g.documents, documentKeys),
     answers: filterRecordRows(g.answers, answerKeys),

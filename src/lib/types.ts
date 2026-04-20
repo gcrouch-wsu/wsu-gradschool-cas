@@ -60,6 +60,11 @@ export interface CasProgramGroup {
   recommendationNote?: string;
   /** When set, `recommendations` is only a fallback; show each row's `values` under its `windowLabel`. */
   recommendationRows?: RecommendationByOffering[];
+  /**
+   * True when Evaluation Type / Min / Max / Minimum Required differ across application windows
+   * (strict policy fields), for coordinator review.
+   */
+  recommendationPolicyDiffersByWindow?: boolean;
   questions: Record<string, string>[];
   documents: Record<string, string>[];
   answers: Record<string, string>[];
@@ -122,6 +127,7 @@ export interface PublicProgramGroup {
   recommendations: Record<string, string> | null;
   recommendationNote?: string;
   recommendationRows?: RecommendationByOffering[];
+  recommendationPolicyDiffersByWindow?: boolean;
   questions: Record<string, string>[];
   documents: Record<string, string>[];
   answers: Record<string, string>[];
