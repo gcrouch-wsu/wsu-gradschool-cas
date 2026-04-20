@@ -98,6 +98,8 @@ export interface PublicPublicationPayload {
   /** Intro card above search. */
   heroEyebrow: string;
   heroBody: string;
+  /** Latest of publication save (e.g. Excel pipeline) and branding capture times; ISO 8601. */
+  refreshedAt: string | null;
   /** When true, show CAS Program ID on application window cards (off by default). */
   showProgramIdOnPublic: boolean;
   termFieldSettings: TermFieldSetting[];

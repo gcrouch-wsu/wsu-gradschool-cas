@@ -329,6 +329,23 @@ function mapToPublicGroup(
   };
 }
 
+/** Most recent activity: publication update or any embedded branding capture. */
+function computeRefreshedAtIso(row: PublicationRow): string | null {
+  const candidates: number[] = [];
+  const pub = Date.parse(row.updated_at);
+  if (!Number.isNaN(pub)) candidates.push(pub);
+  for (const g of row.data.groups) {
+    for (const o of g.offerings) {
+      const ca = o.branding?.capturedAt;
+      if (!ca) continue;
+      const t = Date.parse(ca);
+      if (!Number.isNaN(t)) candidates.push(t);
+    }
+  }
+  if (candidates.length === 0) return null;
+  return new Date(Math.max(...candidates)).toISOString();
+}
+
 function stripLocalBrandingData(data: CasPublicationData): CasPublicationData {
   return {
     ...data,
@@ -363,6 +380,7 @@ export function toPublicPayload(row: PublicationRow): PublicPublicationPayload {
     publicHeaderTitleHref: header.titleHref,
     heroEyebrow: row.public_hero_eyebrow.trim() || DEFAULT_PUBLIC_HERO_EYEBROW,
     heroBody: row.public_hero_body.trim() || DEFAULT_PUBLIC_HERO_BODY,
+    refreshedAt: computeRefreshedAtIso(row),
     termFieldSettings: row.term_field_settings,
     showProgramIdOnPublic: row.show_program_id_on_public,
     visibleQuestionColumnKeys: qk,

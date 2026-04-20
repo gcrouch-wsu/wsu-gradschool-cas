@@ -149,20 +149,17 @@ function departmentGroupLabel(g: PublicProgramGroup): string {
   return d || OTHER_DEPT_LABEL;
 }
 
-/** Programs in one department, optionally narrowed by unstructured search (name, code, Program ID). */
-function programsInDepartmentFiltered(
+function filterAndSortGroupsByQuery(
   groups: PublicProgramGroup[],
-  departmentLabel: string,
   rawQuery: string
 ): PublicProgramGroup[] {
-  const inDept = groups.filter((g) => departmentGroupLabel(g) === departmentLabel);
   const ql = rawQuery.trim().toLowerCase();
   if (!ql) {
-    return [...inDept].sort((a, b) =>
+    return [...groups].sort((a, b) =>
       a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" })
     );
   }
-  return inDept
+  return groups
     .filter((g) => {
       if (g.displayName.toLowerCase().includes(ql)) return true;
       if (g.groupKey.toLowerCase().includes(ql)) return true;
@@ -175,6 +172,24 @@ function programsInDepartmentFiltered(
       if (rb !== ra) return rb - ra;
       return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
     });
+}
+
+/** Programs in one department; optional query narrows within that department only (no query in normal mode). */
+function programsInDepartmentFiltered(
+  groups: PublicProgramGroup[],
+  departmentLabel: string,
+  rawQuery: string
+): PublicProgramGroup[] {
+  const inDept = groups.filter((g) => departmentGroupLabel(g) === departmentLabel);
+  return filterAndSortGroupsByQuery(inDept, rawQuery);
+}
+
+/** All programs matching the query (any department). Empty query returns every program, A–Z. */
+function programsMatchingGlobalQuery(
+  groups: PublicProgramGroup[],
+  rawQuery: string
+): PublicProgramGroup[] {
+  return filterAndSortGroupsByQuery(groups, rawQuery);
 }
 
 /** Ordered optgroups: department A–Z, "Other" last; programs alpha within each. */
@@ -269,21 +284,35 @@ export default function PublicCasView({
   );
   const [query, setQuery] = useState("");
 
+  const searchActive = query.trim().length > 0;
+
   const departmentSections = useMemo(
     () => programsByDepartmentForSelect(initial.groups),
     [initial.groups]
   );
 
-  const programsInDept = useMemo(
-    () => programsInDepartmentFiltered(initial.groups, selectedDept, query),
-    [initial.groups, selectedDept, query]
-  );
+  const visiblePrograms = useMemo(() => {
+    if (searchActive) {
+      return programsMatchingGlobalQuery(initial.groups, query);
+    }
+    return programsInDepartmentFiltered(initial.groups, selectedDept, "");
+  }, [initial.groups, searchActive, selectedDept, query]);
 
   useEffect(() => {
     setSelectedKey((prev) =>
-      programsInDept.some((g) => g.groupKey === prev) ? prev : programsInDept[0]?.groupKey ?? ""
+      visiblePrograms.some((g) => g.groupKey === prev) ? prev : visiblePrograms[0]?.groupKey ?? ""
     );
-  }, [selectedDept, query, programsInDept]);
+  }, [selectedDept, query, visiblePrograms]);
+
+  useEffect(() => {
+    if (!searchActive) return;
+    const g =
+      visiblePrograms.find((x) => x.groupKey === selectedKey) ??
+      visiblePrograms[0];
+    if (!g) return;
+    const dept = departmentGroupLabel(g);
+    setSelectedDept((d) => (d === dept ? d : dept));
+  }, [searchActive, visiblePrograms, selectedKey]);
 
   const selected = useMemo(
     () => pickGroup(initial.groups, selectedKey),
@@ -291,11 +320,11 @@ export default function PublicCasView({
   );
 
   const stepProgram = (delta: number) => {
-    if (programsInDept.length === 0) return;
-    const idx = programsInDept.findIndex((g) => g.groupKey === selectedKey);
+    if (visiblePrograms.length === 0) return;
+    const idx = visiblePrograms.findIndex((g) => g.groupKey === selectedKey);
     const base = idx < 0 ? 0 : idx;
-    const next = (base + delta + programsInDept.length) % programsInDept.length;
-    setSelectedKey(programsInDept[next].groupKey);
+    const next = (base + delta + visiblePrograms.length) % visiblePrograms.length;
+    setSelectedKey(visiblePrograms[next].groupKey);
   };
 
   const showOrg =
@@ -311,76 +340,100 @@ export default function PublicCasView({
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-wsu-gray-dark">
           {initial.title}
         </h1>
+        {initial.refreshedAt ? (
+          <p className="mt-2 text-sm text-wsu-gray">
+            Refreshed on{" "}
+            {new Date(initial.refreshedAt).toLocaleString(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+          </p>
+        ) : null}
         <div className="mt-3">
           <HeroRichText text={initial.heroBody} />
         </div>
       </header>
 
-      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end">
-        <label className="min-w-[min(100%,260px)] flex-1 text-sm font-medium text-wsu-gray-dark">
-          Department
-          <select
-            value={selectedDept}
-            onChange={(e) => setSelectedDept(e.target.value)}
-            className="mt-1.5 w-full rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
-          >
-            {departmentSections.map((section) => (
-              <option key={section.label} value={section.label}>
-                {section.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="min-w-[min(100%,320px)] flex-[2] text-sm font-medium text-wsu-gray-dark">
-          Program
-          <div className="mt-1.5 flex gap-2">
-            <select
-              value={selectedKey}
-              onChange={(e) => setSelectedKey(e.target.value)}
-              className="min-w-0 flex-1 rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
-            >
-              {programsInDept.map((g) => (
-                <option key={g.groupKey} value={g.groupKey}>
-                  {g.displayName}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              aria-label="Previous program"
-              disabled={programsInDept.length <= 1}
-              onClick={() => stepProgram(-1)}
-              className="shrink-0 rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base font-semibold leading-none text-wsu-gray-dark shadow-sm hover:bg-wsu-cream/50 disabled:pointer-events-none disabled:opacity-40 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              aria-label="Next program"
-              disabled={programsInDept.length <= 1}
-              onClick={() => stepProgram(1)}
-              className="shrink-0 rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base font-semibold leading-none text-wsu-gray-dark shadow-sm hover:bg-wsu-cream/50 disabled:pointer-events-none disabled:opacity-40 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
-            >
-              ›
-            </button>
-          </div>
-        </label>
-        <label className="min-w-0 flex-1 text-sm font-medium text-wsu-gray-dark lg:max-w-md">
+      <div className="mb-8 flex flex-col gap-4">
+        <label className="block w-full text-sm font-medium text-wsu-gray-dark">
           Search
           <input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Narrow by name, code, or Program ID…"
+            placeholder="Search by program name, group code, or Program ID (all departments)…"
             className="mt-1.5 w-full rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm placeholder:text-wsu-gray/60 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
           />
         </label>
+        {searchActive ? (
+          <p className="text-xs text-wsu-gray">
+            Department is set from the program you select. Clear search to pick a department first.
+          </p>
+        ) : null}
+        <div className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end">
+          <label className="min-w-[min(100%,260px)] flex-1 text-sm font-medium text-wsu-gray-dark">
+            Department
+            <select
+              value={selectedDept}
+              disabled={searchActive}
+              title={
+                searchActive
+                  ? "Clear the search box to choose a department"
+                  : undefined
+              }
+              onChange={(e) => setSelectedDept(e.target.value)}
+              className="mt-1.5 w-full rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25 disabled:cursor-not-allowed disabled:bg-wsu-cream/40 disabled:opacity-90"
+            >
+              {departmentSections.map((section) => (
+                <option key={section.label} value={section.label}>
+                  {section.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-[min(100%,320px)] flex-[2] text-sm font-medium text-wsu-gray-dark">
+            Program
+            <div className="mt-1.5 flex gap-2">
+              <select
+                value={selectedKey}
+                onChange={(e) => setSelectedKey(e.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
+              >
+                {visiblePrograms.map((g) => (
+                  <option key={g.groupKey} value={g.groupKey}>
+                    {searchActive
+                      ? `${g.displayName} (${departmentGroupLabel(g)})`
+                      : g.displayName}
+                </option>
+              ))}
+            </select>
+              <button
+                type="button"
+                aria-label="Previous program"
+                disabled={visiblePrograms.length <= 1}
+                onClick={() => stepProgram(-1)}
+                className="shrink-0 rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base font-semibold leading-none text-wsu-gray-dark shadow-sm hover:bg-wsu-cream/50 disabled:pointer-events-none disabled:opacity-40 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                aria-label="Next program"
+                disabled={visiblePrograms.length <= 1}
+                onClick={() => stepProgram(1)}
+                className="shrink-0 rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base font-semibold leading-none text-wsu-gray-dark shadow-sm hover:bg-wsu-cream/50 disabled:pointer-events-none disabled:opacity-40 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
+              >
+                ›
+              </button>
+            </div>
+          </label>
+        </div>
       </div>
 
-      {programsInDept.length === 0 ? (
+      {visiblePrograms.length === 0 ? (
         <p className="rounded-lg border border-wsu-gray/15 bg-white px-4 py-6 text-wsu-gray">
-          {query.trim()
-            ? "No programs in this department match your search."
+          {searchActive
+            ? "No programs match your search."
             : "No programs in this department."}
         </p>
       ) : selected ? (
@@ -642,7 +695,10 @@ function ProgramDetail({
     <article className="space-y-10 rounded-xl border border-wsu-gray/10 bg-white p-6 shadow-sm">
       <div>
         <h2 className="text-2xl font-semibold text-wsu-gray-dark">{group.displayName}</h2>
-        <p className="mt-1 font-mono text-xs text-wsu-gray">Group: {group.groupKey}</p>
+        <p className="mt-2 text-sm text-wsu-gray">
+          <span className="font-medium text-wsu-gray-dark">Group code </span>
+          <span className="font-mono text-xs text-wsu-gray-dark">{group.groupKey}</span>
+        </p>
       </div>
 
       {Object.keys(group.visibleShared).length > 0 && (
