@@ -355,21 +355,6 @@ export default function PublicCasView({
       </header>
 
       <div className="mb-8 flex flex-col gap-4">
-        <label className="block w-full text-sm font-medium text-wsu-gray-dark">
-          Search
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by program name, group code, or Program ID (all departments)…"
-            className="mt-1.5 w-full rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm placeholder:text-wsu-gray/60 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
-          />
-        </label>
-        {searchActive ? (
-          <p className="text-xs text-wsu-gray">
-            Department is set from the program you select. Clear search to pick a department first.
-          </p>
-        ) : null}
         <div className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end">
           <label className="min-w-[min(100%,260px)] flex-1 text-sm font-medium text-wsu-gray-dark">
             Department
@@ -404,9 +389,9 @@ export default function PublicCasView({
                     {searchActive
                       ? `${g.displayName} (${departmentGroupLabel(g)})`
                       : g.displayName}
-                </option>
-              ))}
-            </select>
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 aria-label="Previous program"
@@ -427,7 +412,22 @@ export default function PublicCasView({
               </button>
             </div>
           </label>
+          <label className="min-w-0 flex-1 text-sm font-medium text-wsu-gray-dark lg:max-w-md">
+            Search
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by program name, group code, or Program ID (all departments)…"
+              className="mt-1.5 w-full rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm placeholder:text-wsu-gray/60 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
+            />
+          </label>
         </div>
+        {searchActive ? (
+          <p className="text-xs text-wsu-gray">
+            Department is set from the program you select. Clear search to pick a department first.
+          </p>
+        ) : null}
       </div>
 
       {visiblePrograms.length === 0 ? (
