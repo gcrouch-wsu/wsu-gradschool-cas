@@ -18,7 +18,7 @@ import {
 } from "@/lib/record-key";
 import {
   BRANDING_DIFF_BLOCK_CLASS,
-  highlightInstructionPairwise,
+  highlightInstructionSet,
 } from "@/lib/branding-instruction-diff";
 import { sanitizeBrandingHtml } from "@/lib/sanitize-branding-html";
 import type {
@@ -696,21 +696,17 @@ function ProgramDetail({
       ? "grid gap-4 lg:grid-cols-2 lg:items-stretch"
       : "space-y-4";
 
-  /** Word-level instruction diff (two windows only); order matches `group.offerings`. */
-  const brandingInstructionsPairwiseByProgramId = useMemo(() => {
-    if (!brandingTwoColumn) return null;
+  /** Line/phrase instruction diff for any multi-window branding group. */
+  const brandingInstructionsByProgramId = useMemo(() => {
     const branded = group.offerings.filter(
       (o): o is CasOffering & { branding: ProgramBranding } => Boolean(o.branding)
     );
-    if (branded.length !== 2) return null;
-    const s1 = sanitizeBrandingHtml(branded[0].branding.instructionsHtml);
-    const s2 = sanitizeBrandingHtml(branded[1].branding.instructionsHtml);
-    const { htmlA, htmlB } = highlightInstructionPairwise(s1, s2);
-    return new Map([
-      [branded[0].programId.trim(), htmlA],
-      [branded[1].programId.trim(), htmlB],
-    ]);
-  }, [brandingTwoColumn, group.offerings]);
+    if (branded.length <= 1) return null;
+    const highlighted = highlightInstructionSet(
+      branded.map((o) => sanitizeBrandingHtml(o.branding.instructionsHtml))
+    );
+    return new Map(branded.map((o, index) => [o.programId.trim(), highlighted[index]]));
+  }, [group.offerings]);
 
   return (
     <article className="space-y-10 rounded-xl border border-wsu-gray/10 bg-white p-6 shadow-sm">
@@ -816,28 +812,29 @@ function ProgramDetail({
           {sectionTitle("Student-facing branding")}
           <p className="text-sm text-wsu-gray">
             Branding is linked by CAS Program ID so coordinators can review the same header image
-            and HTML instructions applicants see.
+            and applicant-facing instructions.
           </p>
           {hasBrandingDifferences ? (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
               {brandingTwoColumn ? (
                 <>
                   Branding differs between these two application windows. Compare the columns side
-                  by side. Changed words in instructions are highlighted in{" "}
-                  <span className="font-semibold">amber</span>; paragraphs with rich formatting use
-                  a <span className="font-semibold">gold left bar</span> instead.
+                  by side. Changed instruction lines use a{" "}
+                  <span className="font-semibold">gold left bar</span>, with changed words
+                  underlined.
                 </>
               ) : brandingThreeTile ? (
                 <>
                   Branding differs between these application windows. Compare the grid below.
-                  Paragraphs with a <span className="font-semibold">gold left bar</span> differ
-                  from other windows.
+                  Changed instruction lines use a{" "}
+                  <span className="font-semibold">gold left bar</span>, with changed words
+                  underlined when there is a close matching line.
                 </>
               ) : (
                 <>
-                  Branding differs between application windows. Paragraphs with a{" "}
-                  <span className="font-semibold">gold left bar</span> mark text that does not
-                  match across windows.
+                  Branding differs between application windows. Changed instruction lines use a{" "}
+                  <span className="font-semibold">gold left bar</span>, with changed words
+                  underlined when there is a close matching line.
                 </>
               )}
             </p>
@@ -852,7 +849,7 @@ function ProgramDetail({
                   showProgramIdOnPublic={showProgramIdOnPublic}
                   brandingDifference={brandingDiffersByProgramId.get(o.programId)}
                   fillGridCell={brandingTwoColumn || brandingThreeTile}
-                  pairwiseInstructionsHtml={brandingInstructionsPairwiseByProgramId?.get(
+                  highlightedInstructionsHtml={brandingInstructionsByProgramId?.get(
                     o.programId.trim()
                   )}
                 />
@@ -985,7 +982,7 @@ function BrandingPreviewCard({
   showProgramIdOnPublic,
   brandingDifference,
   fillGridCell,
-  pairwiseInstructionsHtml,
+  highlightedInstructionsHtml,
 }: {
   offering: CasOffering;
   termFieldSettings: TermFieldSetting[];
@@ -993,8 +990,8 @@ function BrandingPreviewCard({
   brandingDifference?: BrandingDifferenceInfo;
   /** When true, card fills grid cell (equal width/height with siblings on large screens). */
   fillGridCell?: boolean;
-  /** Precomputed word-level diff vs peer window (two-column branding only). */
-  pairwiseInstructionsHtml?: string;
+  /** Precomputed line/phrase diff for multi-window branding. */
+  highlightedInstructionsHtml?: string;
 }) {
   const branding = offering.branding;
   const titleLine = applicationWindowCardTitle(offering, termFieldSettings);
@@ -1024,8 +1021,8 @@ function BrandingPreviewCard({
   const differingInstructionLines =
     brandingDifference?.differingInstructionLines ?? new Set<string>();
   const highlightedHtml =
-    pairwiseInstructionsHtml !== undefined
-      ? pairwiseInstructionsHtml
+    highlightedInstructionsHtml !== undefined
+      ? highlightedInstructionsHtml
       : highlightInstructionBlocks(safeHtml, differingInstructionLines);
   const differenceLabels = [
     deadlineDiffers ? "deadline" : "",
