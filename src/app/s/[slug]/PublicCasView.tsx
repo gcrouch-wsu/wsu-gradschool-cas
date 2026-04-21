@@ -725,6 +725,38 @@ function ProgramDetail({
       {group.offerings.length > 0 && (
         <section className="space-y-3">
           {sectionTitle("Application windows")}
+          <div className="rounded-lg border border-wsu-gray/10 bg-wsu-cream/30 px-3 py-3 text-sm leading-relaxed text-wsu-gray-dark">
+            <p>
+              <span className="font-semibold text-wsu-gray-dark">Default Deadline </span>
+              — The date the program closes and stops accepting applications. This can be on or
+              before the close of the application cycle.
+            </p>
+            <p className="mt-3">
+              <span className="font-semibold text-wsu-gray-dark">Display Deadline </span>
+              — How the deadline appears to applicants in the portal. This is a display setting, not
+              a date field, and has three options:
+            </p>
+            <ul className="mt-2 list-disc space-y-2 pl-5 text-wsu-gray-dark">
+              <li>
+                <span className="font-semibold">Same Deadline </span>
+                — applicants see the Default Deadline date.
+              </li>
+              <li>
+                <span className="font-semibold">Different Date </span>
+                — applicants see an earlier priority date; the program remains open until the Default
+                Deadline. Use caution with this option: applicants will treat the displayed date as
+                the final deadline and may not apply after it passes, even though the program is still
+                open.
+              </li>
+              <li>
+                <span className="font-semibold">Rolling </span>
+                — applicants see &quot;Rolling&quot;; the program remains open until the Default
+                Deadline. Use caution with this option: applicants have no indication of when the
+                program actually closes. If you use this setting, you must communicate the Default
+                Deadline date in your program&apos;s branding text.
+              </li>
+            </ul>
+          </div>
           <ul className="space-y-3 text-sm text-wsu-gray-dark">
             {group.offerings.map((o) => {
               const bullets = visibleTermBullets(o, termFieldSettings);
