@@ -16,6 +16,10 @@ import {
   getRecordValueCi,
   unionRowKeysWithData,
 } from "@/lib/record-key";
+import {
+  BRANDING_DIFF_BLOCK_CLASS,
+  highlightInstructionPairwise,
+} from "@/lib/branding-instruction-diff";
 import { sanitizeBrandingHtml } from "@/lib/sanitize-branding-html";
 import type {
   CasOffering,
@@ -524,9 +528,6 @@ type BrandingDifferenceInfo = {
 const BRANDING_BLOCK_RE =
   /<(p|li|h[1-6]|blockquote|div)(\s[^>]*)?>([\s\S]*?)<\/\1>/gi;
 const BRANDING_LINE_BREAK_RE = /<br\s*\/?>/gi;
-/** Whole block gets a left accent — avoids stacked inline yellow boxes. */
-const BRANDING_DIFF_BLOCK_CLASS =
-  "border-l-4 border-amber-400 bg-amber-50 pl-3 py-2 rounded-r my-1.5";
 
 function mergeHtmlClass(attrs: string, cls: string): string {
   const a = attrs.trim();
@@ -695,6 +696,22 @@ function ProgramDetail({
       ? "grid gap-4 lg:grid-cols-2 lg:items-stretch"
       : "space-y-4";
 
+  /** Word-level instruction diff (two windows only); order matches `group.offerings`. */
+  const brandingInstructionsPairwiseByProgramId = useMemo(() => {
+    if (!brandingTwoColumn) return null;
+    const branded = group.offerings.filter(
+      (o): o is CasOffering & { branding: ProgramBranding } => Boolean(o.branding)
+    );
+    if (branded.length !== 2) return null;
+    const s1 = sanitizeBrandingHtml(branded[0].branding.instructionsHtml);
+    const s2 = sanitizeBrandingHtml(branded[1].branding.instructionsHtml);
+    const { htmlA, htmlB } = highlightInstructionPairwise(s1, s2);
+    return new Map([
+      [branded[0].programId.trim(), htmlA],
+      [branded[1].programId.trim(), htmlB],
+    ]);
+  }, [brandingTwoColumn, group.offerings]);
+
   return (
     <article className="space-y-10 rounded-xl border border-wsu-gray/10 bg-white p-6 shadow-sm">
       <div>
@@ -805,10 +822,10 @@ function ProgramDetail({
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
               {brandingTwoColumn ? (
                 <>
-                  Branding differs between these two application windows. Compare the columns
-                  side by side. Paragraphs with a{" "}
-                  <span className="font-semibold">gold left bar</span> differ from the other
-                  window.
+                  Branding differs between these two application windows. Compare the columns side
+                  by side. Changed words in instructions are highlighted in{" "}
+                  <span className="font-semibold">amber</span>; paragraphs with rich formatting use
+                  a <span className="font-semibold">gold left bar</span> instead.
                 </>
               ) : brandingThreeTile ? (
                 <>
@@ -835,6 +852,9 @@ function ProgramDetail({
                   showProgramIdOnPublic={showProgramIdOnPublic}
                   brandingDifference={brandingDiffersByProgramId.get(o.programId)}
                   fillGridCell={brandingTwoColumn || brandingThreeTile}
+                  pairwiseInstructionsHtml={brandingInstructionsPairwiseByProgramId?.get(
+                    o.programId.trim()
+                  )}
                 />
               );
               if (brandingThreeTile && index === 2) {
@@ -965,6 +985,7 @@ function BrandingPreviewCard({
   showProgramIdOnPublic,
   brandingDifference,
   fillGridCell,
+  pairwiseInstructionsHtml,
 }: {
   offering: CasOffering;
   termFieldSettings: TermFieldSetting[];
@@ -972,6 +993,8 @@ function BrandingPreviewCard({
   brandingDifference?: BrandingDifferenceInfo;
   /** When true, card fills grid cell (equal width/height with siblings on large screens). */
   fillGridCell?: boolean;
+  /** Precomputed word-level diff vs peer window (two-column branding only). */
+  pairwiseInstructionsHtml?: string;
 }) {
   const branding = offering.branding;
   const titleLine = applicationWindowCardTitle(offering, termFieldSettings);
@@ -1000,7 +1023,10 @@ function BrandingPreviewCard({
   const linksDiffers = brandingDifference?.linkDiffers === true;
   const differingInstructionLines =
     brandingDifference?.differingInstructionLines ?? new Set<string>();
-  const highlightedHtml = highlightInstructionBlocks(safeHtml, differingInstructionLines);
+  const highlightedHtml =
+    pairwiseInstructionsHtml !== undefined
+      ? pairwiseInstructionsHtml
+      : highlightInstructionBlocks(safeHtml, differingInstructionLines);
   const differenceLabels = [
     deadlineDiffers ? "deadline" : "",
     differingInstructionLines.size > 0 ? "instructions" : "",
