@@ -48,14 +48,6 @@ const postSchema = z.object({
   profile: z.string().trim().min(1).max(100),
 });
 
-function allProgramIdsFromPublication(row: NonNullable<Awaited<ReturnType<typeof getPublicationBySlug>>>) {
-  return [
-    ...new Set(
-      row.data.groups.flatMap((group) => group.offerings.map((offering) => offering.programId.trim())).filter(Boolean)
-    ),
-  ];
-}
-
 async function spawnBrandingProcess(args: string[]) {
   const child = spawn(process.execPath, args, {
     cwd: process.cwd(),
@@ -93,7 +85,8 @@ export async function GET(
   const expected = expectedIdsByProfile(row);
   const profileStatus = DEFAULT_PROFILES.map((profile) => {
     const ids = [...expected[profile as keyof typeof expected]];
-    const captured = ids.filter((id) => brandingByProgramId.has(id));
+    const capturedAny = ids.filter((id) => brandingByProgramId.has(id));
+    const capturedOk = ids.filter((id) => brandingByProgramId.get(id)?.status === "ok");
     const missing = ids.filter((id) => !brandingByProgramId.get(id));
     const latest = branding.profiles.find((p) => p.profile === profile)?.latestSnapshot ?? null;
     const hasMissingIds = missing.length > 0;
@@ -103,7 +96,7 @@ export async function GET(
     const status =
       ids.length === 0
         ? "not_applicable"
-        : captured.length === 0 || hasMissingIds
+        : capturedAny.length === 0 || hasMissingIds
           ? "missing"
           : dataNewerThanSnapshot
             ? "stale"
@@ -113,7 +106,8 @@ export async function GET(
       label: profile === "gradcas" ? "GradCAS" : "EngineeringCAS",
       expectedExcelName: profile === "gradcas" ? "GradCAS.xlsx" : "EngCAS.xlsx",
       expectedProgramCount: ids.length,
-      capturedProgramCount: captured.length,
+      capturedProgramCount: capturedAny.length,
+      okBrandingProgramCount: capturedOk.length,
       missingProgramCount: missing.length,
       missingProgramIds: missing.slice(0, 25),
       status,
@@ -143,7 +137,8 @@ export async function GET(
       publicationSlug: row.slug,
       publicationTitle: row.title,
       publicationUpdatedAt: row.updated_at,
-      blobPath: "cas-branding-capture/current.json",
+      blobPath: `cas-branding-capture/${row.slug}.json`,
+      currentPointerPath: "cas-branding-capture/current.json",
       profiles: profileStatus,
       localAppUrl: "http://127.0.0.1:5050",
     },
@@ -157,6 +152,18 @@ export async function POST(
 ) {
   const deny = await unauthorizedIfNotAdmin();
   if (deny) return deny;
+
+  // Server-side Playwright spawn is obsolete; use the local Flask branding app.
+  if (process.env.ALLOW_SERVER_BRANDING_CAPTURE !== "1") {
+    return NextResponse.json(
+      {
+        error:
+          "Server-side branding capture is disabled. Use the local Flask app at http://127.0.0.1:5050.",
+      },
+      { status: 410 }
+    );
+  }
+
   const { slug } = await ctx.params;
   const row = await getPublicationBySlug(slug);
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -169,7 +176,7 @@ export async function POST(
   }
   const parsed = postSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ error: "Invalid request", details: parsed.error.flatten() }, { status: 400 });
   }
 
   const { action, profile } = parsed.data;
@@ -197,7 +204,10 @@ export async function POST(
     });
   }
 
-  const ids = allProgramIdsFromPublication(row);
+  const expected = expectedIdsByProfile(row);
+  const ids = [
+    ...(expected[profile as keyof typeof expected] ?? new Set<string>()),
+  ];
   const idFile = await writeProgramIdsFile(slug, profile, ids);
   const snapshotId = nextSnapshotId();
   const outputDir = snapshotPath(snapshotId, profile);

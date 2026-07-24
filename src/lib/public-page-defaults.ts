@@ -1,7 +1,8 @@
 /** Defaults when publication-specific public fields are blank. */
 
-export const DEFAULT_PUBLIC_HEADER_TITLE = "CAS program viewer";
+export const DEFAULT_PUBLIC_HEADER_TITLE = "GradCAS and EngineeringCAS Applications";
 
+/** Secondary line under the title (often the application cycle). */
 export const DEFAULT_PUBLIC_HEADER_SUBTITLE = "Washington State University";
 
 export const DEFAULT_PUBLIC_HEADER_TITLE_HREF = "/";

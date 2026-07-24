@@ -125,7 +125,7 @@ export async function POST(request: Request) {
     try {
       const text = await settingsFile.text();
       const raw = JSON.parse(text) as unknown;
-      const patch = parsePublicationSettingsImport(raw);
+      const { patch } = parsePublicationSettingsImport(raw, slug);
       const row = await getPublicationBySlug(slug);
       if (!row) {
         settingsImportError =

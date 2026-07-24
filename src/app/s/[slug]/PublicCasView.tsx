@@ -21,6 +21,7 @@ import {
   highlightInstructionSet,
 } from "@/lib/branding-instruction-diff";
 import { sanitizeBrandingHtml } from "@/lib/sanitize-branding-html";
+import { sanitizePublicHref } from "@/lib/safe-url";
 import type {
   CasOffering,
   ProgramBranding,
@@ -1045,19 +1046,15 @@ function BrandingPreviewCard({
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-wsu-gray">
           {showProgramIdOnPublic ? <span>Program ID: {offering.programId}</span> : null}
-          <span>Profile: {branding.sourceProfile}</span>
-          <span>Captured: {new Date(branding.capturedAt).toLocaleString()}</span>
-          <span
-            className={`rounded-full px-2 py-0.5 font-semibold ${
-              branding.status === "ok"
-                ? "bg-emerald-100 text-emerald-800"
-                : branding.status === "empty_shell"
-                  ? "bg-amber-100 text-amber-900"
-                  : "bg-red-100 text-red-800"
-            }`}
-          >
-            {branding.status}
-          </span>
+          {emptyShell ? (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-900">
+              Incomplete branding
+            </span>
+          ) : branding.status === "error" ? (
+            <span className="rounded-full bg-red-100 px-2 py-0.5 font-semibold text-red-800">
+              Branding unavailable
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="border-b border-wsu-gray/10 bg-wsu-gray-dark">
@@ -1119,18 +1116,22 @@ function BrandingPreviewCard({
                 : ""
             }`}
           >
-            {branding.links.map((link, index) => (
-              <li key={`${link.href}-${index}`}>
-                <a
-                  href={link.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-wsu-crimson underline decoration-wsu-crimson/30"
-                >
-                  {link.text || link.href}
-                </a>
-              </li>
-            ))}
+            {branding.links.map((link, index) => {
+              const href = sanitizePublicHref(link.href, "");
+              if (!href || href === "#") return null;
+              return (
+                <li key={`${href}-${index}`}>
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-wsu-crimson underline decoration-wsu-crimson/30"
+                  >
+                    {link.text || href}
+                  </a>
+                </li>
+              );
+            })}
           </ul>
         ) : null}
       </div>

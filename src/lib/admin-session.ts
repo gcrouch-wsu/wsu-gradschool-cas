@@ -25,18 +25,21 @@ export async function verifyAdminSession(token: string | undefined): Promise<boo
   const key = encoderSecret();
   if (!key) return false;
   try {
-    await jwtVerify(token, key);
-    return true;
+    const { payload } = await jwtVerify(token, key);
+    return (payload as { role?: unknown }).role === "admin";
   } catch {
     return false;
   }
 }
 
+/** Constant-time compare that does not leak length via early return. */
 function timingSafeEqualStr(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) {
-    out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  const max = Math.max(a.length, b.length, 1);
+  let out = a.length === b.length ? 0 : 1;
+  for (let i = 0; i < max; i++) {
+    const ca = i < a.length ? a.charCodeAt(i) : 0;
+    const cb = i < b.length ? b.charCodeAt(i) : 0;
+    out |= ca ^ cb;
   }
   return out === 0;
 }

@@ -28,6 +28,7 @@ export const publicationSettingsPatchSchema = z.object({
   publicHeroEyebrow: z.string().max(200).optional(),
   publicHeroBody: z.string().max(20000).optional(),
   programDisplayNameStripSuffixes: z.array(z.string().max(200)).max(100).optional(),
+  cycleDisplayOverride: z.string().max(200).optional(),
 });
 
 export type PublicationSettingsPatch = z.infer<typeof publicationSettingsPatchSchema>;
@@ -62,6 +63,7 @@ export function buildPublicationSettingsExport(row: PublicationRow): Publication
       publicHeroEyebrow: row.public_hero_eyebrow,
       publicHeroBody: row.public_hero_body,
       programDisplayNameStripSuffixes: [...row.program_display_name_strip_suffixes],
+      cycleDisplayOverride: row.cycle_display_override,
     },
   };
 }
@@ -77,9 +79,37 @@ function extractSettingsObject(body: unknown): unknown {
   return body;
 }
 
-export function parsePublicationSettingsImport(body: unknown): PublicationSettingsPatch {
+export type PublicationSettingsImportMeta = {
+  exportVersion: number | null;
+  sourceSlug: string | null;
+  versionMismatch: boolean;
+  sourceSlugDiffers: boolean;
+};
+
+export function parsePublicationSettingsImport(
+  body: unknown,
+  targetSlug?: string
+): { patch: PublicationSettingsPatch; meta: PublicationSettingsImportMeta } {
+  const root =
+    body !== null && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  const exportVersion =
+    root && typeof root.exportVersion === "number" ? root.exportVersion : null;
+  const sourceSlug =
+    root && typeof root.sourceSlug === "string" ? root.sourceSlug : null;
   const inner = extractSettingsObject(body);
-  return publicationSettingsPatchSchema.parse(inner);
+  const patch = publicationSettingsPatchSchema.parse(inner);
+  return {
+    patch,
+    meta: {
+      exportVersion,
+      sourceSlug,
+      versionMismatch:
+        exportVersion !== null && exportVersion !== PUBLICATION_SETTINGS_EXPORT_VERSION,
+      sourceSlugDiffers: Boolean(
+        targetSlug && sourceSlug && sourceSlug !== targetSlug
+      ),
+    },
+  };
 }
 
 export type SanitizedPublicationSettingsPatch = {

@@ -6,6 +6,11 @@ import {
   authEnvConfigured,
   signAdminSession,
 } from "@/lib/admin-session";
+import {
+  clearLoginFailures,
+  loginRateLimitExceeded,
+  recordLoginFailure,
+} from "@/lib/login-rate-limit";
 
 export const runtime = "nodejs";
 
@@ -25,6 +30,13 @@ export async function POST(request: Request) {
     );
   }
 
+  if (loginRateLimitExceeded(request)) {
+    return NextResponse.json(
+      { error: "Too many failed sign-in attempts. Try again later." },
+      { status: 429 }
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -39,8 +51,11 @@ export async function POST(request: Request) {
 
   const { username, password } = parsed.data;
   if (!adminCredentialsOk(username, password)) {
+    recordLoginFailure(request);
     return NextResponse.json({ error: "Invalid username or password" }, { status: 401 });
   }
+
+  clearLoginFailures(request);
 
   const jwt = await signAdminSession();
   if (!jwt) {

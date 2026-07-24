@@ -9,6 +9,7 @@ import {
   PROGRAM_NAME_STRIP_COMMA_AND_REST_ALIAS,
   PROGRAM_NAME_STRIP_SPACED_DASH_AND_REST,
 } from "@/lib/program-display";
+import { settingsExportFilename } from "@/lib/settings-filename";
 import type { TermFieldSetting } from "@/lib/types";
 
 type ConfigResponse = {
@@ -33,8 +34,13 @@ type ConfigResponse = {
   publicHeroEyebrow: string;
   publicHeroBody: string;
   programDisplayNameStripSuffixes: string[];
+  cycleDisplayOverride: string;
   groupKeys: { key: string; label: string }[];
   sourceFileName: string;
+  updatedAt?: string;
+  isCurrentView?: boolean;
+  currentViewSlug?: string | null;
+  currentView?: { slug: string; title: string; updatedAt: string } | null;
 };
 
 type BrandingAdminResponse = {
@@ -50,6 +56,7 @@ type BrandingAdminResponse = {
     publicationTitle: string;
     publicationUpdatedAt: string;
     blobPath: string;
+    currentPointerPath?: string;
     localAppUrl: string;
     profiles: {
       profile: string;
@@ -57,6 +64,7 @@ type BrandingAdminResponse = {
       expectedExcelName: string;
       expectedProgramCount: number;
       capturedProgramCount: number;
+      okBrandingProgramCount?: number;
       missingProgramCount: number;
       missingProgramIds: string[];
       status: "current" | "missing" | "stale" | "not_applicable";
@@ -153,6 +161,8 @@ export default function AdminPublicationPage() {
   const [draftPublicHeroEyebrow, setDraftPublicHeroEyebrow] = useState("");
   const [draftPublicHeroBody, setDraftPublicHeroBody] = useState("");
   const [draftProgramStripText, setDraftProgramStripText] = useState("");
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftCycleDisplayOverride, setDraftCycleDisplayOverride] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -163,7 +173,6 @@ export default function AdminPublicationPage() {
   const [settingsImportBusy, setSettingsImportBusy] = useState(false);
   const [settingsImportMessage, setSettingsImportMessage] = useState<string | null>(null);
   const [branding, setBranding] = useState<BrandingAdminResponse | null>(null);
-  const [brandingBusyProfile, setBrandingBusyProfile] = useState<string | null>(null);
 
   const applyConfig = useCallback((c: ConfigResponse) => {
     setSaved(c);
@@ -182,6 +191,8 @@ export default function AdminPublicationPage() {
     setDraftPublicHeroEyebrow(c.publicHeroEyebrow);
     setDraftPublicHeroBody(c.publicHeroBody);
     setDraftProgramStripText(c.programDisplayNameStripSuffixes.join("\n"));
+    setDraftTitle(c.title);
+    setDraftCycleDisplayOverride(c.cycleDisplayOverride ?? "");
   }, []);
 
   const loadConfig = useCallback(async () => {
@@ -268,6 +279,8 @@ export default function AdminPublicationPage() {
   const dirty = useMemo(() => {
     if (!saved) return false;
     return (
+      draftTitle !== saved.title ||
+      draftCycleDisplayOverride !== (saved.cycleDisplayOverride ?? "") ||
       !sortedKeysEqual(draftColumns, saved.visibleColumnKeys) ||
       draftDefault !== saved.defaultGroupKey ||
       draftShowOrg !== saved.showOrgOnPublic ||
@@ -289,6 +302,8 @@ export default function AdminPublicationPage() {
     );
   }, [
     saved,
+    draftTitle,
+    draftCycleDisplayOverride,
     draftColumns,
     draftDefault,
     draftShowOrg,
@@ -306,35 +321,15 @@ export default function AdminPublicationPage() {
     draftProgramStripText,
   ]);
 
-  async function runBrandingAction(profile: string, action: "guide" | "export") {
-    setBrandingBusyProfile(`${profile}:${action}`);
-    setError(null);
-    setSaveMessage(null);
-    try {
-      const res = await fetch(`/api/admin/publications/${slug}/branding`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile, action }),
-      });
-      if (res.status === 401) {
-        router.push(`/admin/login?next=${encodeURIComponent(`/admin/${slug}`)}`);
-        return;
-      }
-      const raw = await res.text();
-      const body = raw.trim() ? (JSON.parse(raw) as { error?: string; message?: string }) : {};
-      if (!res.ok) {
-        setError(body.error ?? "Branding action failed");
-        return;
-      }
-      setSaveMessage(body.message ?? "Branding action started.");
-      await loadBranding();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Branding action failed");
-    } finally {
-      setBrandingBusyProfile(null);
-    }
-  }
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
   async function saveAll() {
     if (!saved) return;
@@ -347,6 +342,7 @@ export default function AdminPublicationPage() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          title: draftTitle,
           visibleColumnKeys: draftColumns,
           defaultGroupKey: draftDefault,
           showOrgOnPublic: draftShowOrg,
@@ -362,6 +358,7 @@ export default function AdminPublicationPage() {
           publicHeroEyebrow: draftPublicHeroEyebrow,
           publicHeroBody: draftPublicHeroBody,
           programDisplayNameStripSuffixes: parseProgramStripLines(draftProgramStripText),
+          cycleDisplayOverride: draftCycleDisplayOverride,
         }),
       });
       if (res.status === 401) {
@@ -382,6 +379,9 @@ export default function AdminPublicationPage() {
       }
       applyConfig({
         ...saved,
+        ...body,
+        title: body.title ?? draftTitle,
+        cycleDisplayOverride: body.cycleDisplayOverride ?? draftCycleDisplayOverride,
         visibleColumnKeys: body.visibleColumnKeys ?? saved.visibleColumnKeys,
         defaultGroupKey: body.defaultGroupKey ?? saved.defaultGroupKey,
         showOrgOnPublic:
@@ -402,8 +402,18 @@ export default function AdminPublicationPage() {
         publicHeroBody: body.publicHeroBody ?? saved.publicHeroBody,
         programDisplayNameStripSuffixes:
           body.programDisplayNameStripSuffixes ?? saved.programDisplayNameStripSuffixes,
+        groupKeys: saved.groupKeys,
+        sourceFileName: saved.sourceFileName,
+        summaryColumnOptions: saved.summaryColumnOptions,
+        questionColumnOptions: saved.questionColumnOptions,
+        answerColumnOptions: saved.answerColumnOptions,
+        documentColumnOptions: saved.documentColumnOptions,
+        slug: saved.slug,
+        isCurrentView: body.isCurrentView ?? saved.isCurrentView,
+        currentViewSlug: body.currentViewSlug ?? saved.currentViewSlug,
+        currentView: body.currentView !== undefined ? body.currentView : saved.currentView,
       });
-      setSaveMessage("Saved. Public page now uses these settings.");
+      setSaveMessage("Saved. This publication’s public page (/s/…) now uses these settings.");
       window.setTimeout(() => setSaveMessage(null), 5000);
     } catch {
       setError("Network error");
@@ -499,7 +509,9 @@ export default function AdminPublicationPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `cas-publication-settings-${slug}.json`;
+    a.download =
+      res.headers.get("X-Suggested-Filename")?.trim() ||
+      settingsExportFilename(slug, saved?.title ?? slug);
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -524,6 +536,24 @@ export default function AdminPublicationPage() {
         setError("That file is not valid JSON.");
         return;
       }
+      if (json && typeof json === "object") {
+        const root = json as Record<string, unknown>;
+        const sourceSlug = typeof root.sourceSlug === "string" ? root.sourceSlug : null;
+        const exportVersion = typeof root.exportVersion === "number" ? root.exportVersion : null;
+        const warns: string[] = [];
+        if (sourceSlug && sourceSlug !== slug) {
+          warns.push(`This file was exported from slug ${sourceSlug}, not ${slug}.`);
+        }
+        if (exportVersion !== null && exportVersion !== 1) {
+          warns.push(`Export version ${exportVersion} differs from the current version (1).`);
+        }
+        if (warns.length > 0) {
+          const ok = window.confirm(
+            `${warns.join(" ")}\n\nImport settings into this publication anyway?`
+          );
+          if (!ok) return;
+        }
+      }
       const res = await fetch(`/api/admin/publications/${slug}/settings-import`, {
         method: "POST",
         credentials: "include",
@@ -535,7 +565,17 @@ export default function AdminPublicationPage() {
         return;
       }
       const raw = await res.text();
-      let parsed: { error?: string; details?: unknown; droppedDefaultGroupKey?: boolean } = {};
+      let parsed: {
+        error?: string;
+        details?: unknown;
+        droppedDefaultGroupKey?: boolean;
+        warnings?: {
+          versionMismatch?: boolean;
+          sourceSlugDiffers?: boolean;
+          exportVersion?: number | null;
+          sourceSlug?: string | null;
+        };
+      } = {};
       try {
         if (raw.trim()) parsed = JSON.parse(raw) as typeof parsed;
       } catch {
@@ -547,10 +587,18 @@ export default function AdminPublicationPage() {
         return;
       }
       await loadConfig();
+      const warnBits: string[] = [];
+      if (parsed.warnings?.sourceSlugDiffers) {
+        warnBits.push(`source was ${parsed.warnings.sourceSlug ?? "unknown"}`);
+      }
+      if (parsed.warnings?.versionMismatch) {
+        warnBits.push(`export version ${parsed.warnings.exportVersion ?? "?"}`);
+      }
+      const warnSuffix = warnBits.length ? ` (note: ${warnBits.join("; ")})` : "";
       setSettingsImportMessage(
         parsed.droppedDefaultGroupKey
-          ? "Imported settings. The previous default program was not in this workbook, so the default program was left as-is."
-          : "Imported settings from JSON."
+          ? `Imported settings. The previous default program was not in this workbook, so the default program was left as-is.${warnSuffix}`
+          : `Imported settings from JSON.${warnSuffix}`
       );
     } catch {
       setError("Could not read that file.");
@@ -576,7 +624,93 @@ export default function AdminPublicationPage() {
     setDraftPublicHeroEyebrow(saved.publicHeroEyebrow);
     setDraftPublicHeroBody(saved.publicHeroBody);
     setDraftProgramStripText(saved.programDisplayNameStripSuffixes.join("\n"));
+    setDraftTitle(saved.title);
+    setDraftCycleDisplayOverride(saved.cycleDisplayOverride ?? "");
     setSaveMessage(null);
+  }
+
+  async function setAsLiveHome() {
+    setSaving(true);
+    setError(null);
+    setSaveMessage(null);
+    try {
+      const res = await fetch(`/api/admin/publications/${slug}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ setAsCurrentView: true }),
+      });
+      if (res.status === 401) {
+        router.push(`/admin/login?next=${encodeURIComponent(`/admin/${slug}`)}`);
+        return;
+      }
+      if (!res.ok) {
+        const raw = await res.text();
+        setError(raw.slice(0, 400) || "Could not set as live home");
+        return;
+      }
+      await loadConfig();
+      setSaveMessage("This publication is now the live home page (/ and /view).");
+      window.setTimeout(() => setSaveMessage(null), 5000);
+    } catch {
+      setError("Network error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function downloadAdminBookmark() {
+    const payload = {
+      version: 1,
+      origin: typeof window !== "undefined" ? window.location.origin : "",
+      slug,
+      title: saved?.title ?? "",
+      adminPath: `/admin/${slug}`,
+      exportedAt: new Date().toISOString(),
+      notes: "",
+    };
+    const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `cas-admin-bookmark-${slug}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function onBookmarkUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text) as {
+        origin?: string;
+        slug?: string;
+        adminPath?: string;
+      };
+      if (!json.slug || !/^[a-z0-9]{8,32}$/.test(json.slug)) {
+        setError("Bookmark file is missing a valid slug.");
+        return;
+      }
+      if (json.origin && json.origin !== window.location.origin) {
+        const ok = window.confirm(
+          `This bookmark points to ${json.origin}, but you are on ${window.location.origin}. Open /admin/${json.slug} on this site anyway?`
+        );
+        if (!ok) return;
+      }
+      const path =
+        typeof json.adminPath === "string" && json.adminPath.startsWith("/admin/")
+          ? json.adminPath
+          : `/admin/${json.slug}`;
+      router.push(path);
+    } catch {
+      setError("Could not read that bookmark file.");
+    }
   }
 
   function toggleColumn(key: string) {
@@ -676,8 +810,46 @@ export default function AdminPublicationPage() {
         Publication settings
       </h1>
       <p className="mt-1 font-mono text-xs text-wsu-gray">slug: {slug}</p>
+      {saved ? (
+        <label className="mt-4 block text-sm font-medium text-wsu-gray-dark">
+          Publication title
+          <input
+            type="text"
+            value={draftTitle}
+            disabled={saving}
+            onChange={(e) => setDraftTitle(e.target.value)}
+            className="mt-1.5 w-full rounded-lg border border-wsu-gray/25 bg-wsu-cream px-3 py-2 text-sm text-wsu-gray-dark shadow-inner focus:border-wsu-crimson focus:outline-none focus:ring-1 focus:ring-wsu-crimson"
+          />
+        </label>
+      ) : null}
+      {saved && saved.isCurrentView === false && saved.currentView ? (
+        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p className="font-semibold">Not the live home page</p>
+          <p className="mt-1">
+            Home (/ and /view) currently shows{" "}
+            <strong>{saved.currentView.title}</strong>
+            {saved.currentView.updatedAt
+              ? ` (updated ${new Date(saved.currentView.updatedAt).toLocaleString()})`
+              : ""}
+            . Saving here updates only this publication’s snapshot at{" "}
+            <code className="font-mono text-xs">/s/{slug}</code>.
+          </p>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void setAsLiveHome()}
+            className="mt-3 rounded-lg bg-wsu-crimson px-4 py-2 text-sm font-semibold text-white hover:bg-wsu-crimson-dark disabled:opacity-50"
+          >
+            Set as live home page
+          </button>
+        </div>
+      ) : saved?.isCurrentView ? (
+        <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          This publication drives the live home page (/ and /view).
+        </p>
+      ) : null}
       <p className="mt-2 text-sm text-wsu-gray">
-        Live public URL:{" "}
+        Live home URL:{" "}
         <a
           href={publicPath}
           target="_blank"
@@ -686,10 +858,12 @@ export default function AdminPublicationPage() {
         >
           {publicPath}
         </a>
-        {" "}updates whenever you save this publication.
+        {" "}
+        — use <strong className="text-wsu-gray-dark">Set as live home page</strong> to point home
+        here (saving settings alone does not switch it).
       </p>
       <p className="mt-1 text-xs text-wsu-gray">
-        Snapshot URL:{" "}
+        This publication URL:{" "}
         <a
           href={snapshotPath}
           target="_blank"
@@ -759,6 +933,35 @@ export default function AdminPublicationPage() {
                   onChange={(ev) => void onSettingsImportChange(ev)}
                 />
                 {settingsImportBusy ? "Importing…" : "Import settings JSON"}
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-wsu-gray/15 bg-white p-5 shadow-sm">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-wsu-gray">
+              Admin bookmark (handoff)
+            </h2>
+            <p className="mt-2 text-sm text-wsu-gray">
+              Download a small JSON pointer (no passwords or cookies) so another coordinator can
+              reopen this publication on the same deploy. Upload a bookmark to jump to its admin
+              page.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={downloadAdminBookmark}
+                className="rounded-lg border border-wsu-gray/25 bg-white px-4 py-2.5 text-sm font-semibold text-wsu-gray-dark shadow-sm hover:bg-wsu-cream"
+              >
+                Download admin bookmark
+              </button>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-wsu-gray/25 bg-white px-4 py-2.5 text-sm font-semibold text-wsu-gray-dark shadow-sm hover:bg-wsu-cream">
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className="sr-only"
+                  onChange={(ev) => void onBookmarkUpload(ev)}
+                />
+                Open bookmark file
               </label>
             </div>
           </section>
@@ -878,28 +1081,6 @@ export default function AdminPublicationPage() {
                             <span className="font-mono">{profileRow.latestSnapshotId ?? "none"}</span>
                           </p>
                         </div>
-                        <div className="hidden">
-                          <button
-                            type="button"
-                            disabled={brandingBusyProfile !== null}
-                            onClick={() => void runBrandingAction(profileRow.profile, "guide")}
-                            className="rounded-lg border border-wsu-gray/25 bg-white px-3 py-2 text-sm font-semibold text-wsu-gray-dark shadow-sm hover:bg-wsu-cream disabled:opacity-50"
-                          >
-                            {brandingBusyProfile === `${profileRow.profile}:guide`
-                              ? "Launching…"
-                              : "Guide login"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={brandingBusyProfile !== null}
-                            onClick={() => void runBrandingAction(profileRow.profile, "export")}
-                            className="rounded-lg bg-wsu-crimson px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-wsu-crimson-dark disabled:opacity-50"
-                          >
-                            {brandingBusyProfile === `${profileRow.profile}:export`
-                              ? "Starting…"
-                              : "Capture branding"}
-                          </button>
-                        </div>
                       </div>
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-wsu-gray">
                         <span
@@ -916,7 +1097,10 @@ export default function AdminPublicationPage() {
                           {profileRow.status.replace("_", " ")}
                         </span>
                         <span>Expected {profileRow.expectedProgramCount} Program IDs</span>
-                        <span>Captured {profileRow.capturedProgramCount}</span>
+                        <span>Any capture {profileRow.capturedProgramCount}</span>
+                        <span>
+                          OK branding {profileRow.okBrandingProgramCount ?? "—"}
+                        </span>
                         <span>Missing {profileRow.missingProgramCount}</span>
                       </div>
                       <p className="mt-2 text-xs text-wsu-gray">
@@ -956,13 +1140,9 @@ export default function AdminPublicationPage() {
               Public link: header &amp; intro
             </h2>
             <p className="mt-2 text-sm text-wsu-gray">
-              These settings apply only to the public viewer at{" "}
-              <code className="rounded bg-wsu-cream px-1 py-0.5 font-mono text-xs text-wsu-gray-dark">
-                /s/{slug}
-              </code>
-              . Leave a field empty to use the built-in default for that line. The publication title
-              above is still edited when you upload; it appears as the large heading under the intro
-              eyebrow.
+              These settings control the crimson top bar and intro on the public viewer. Leave a
+              field empty to use the built-in default. The publication title above is the large
+              heading under the intro eyebrow.
             </p>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="block text-sm font-medium text-wsu-gray-dark sm:col-span-2">
@@ -972,20 +1152,35 @@ export default function AdminPublicationPage() {
                   value={draftPublicHeaderTitle}
                   disabled={saving}
                   onChange={(e) => setDraftPublicHeaderTitle(e.target.value)}
-                  placeholder="CAS program viewer"
+                  placeholder="GradCAS and EngineeringCAS Applications"
                   className="mt-1.5 w-full rounded-lg border border-wsu-gray/25 bg-wsu-cream px-3 py-2 text-sm text-wsu-gray-dark shadow-inner focus:border-wsu-crimson focus:outline-none focus:ring-1 focus:ring-wsu-crimson"
                 />
               </label>
               <label className="block text-sm font-medium text-wsu-gray-dark sm:col-span-2">
-                Top bar subtitle (e.g. institution)
+                Cycle / secondary line (under title)
                 <input
                   type="text"
                   value={draftPublicHeaderSubtitle}
                   disabled={saving}
                   onChange={(e) => setDraftPublicHeaderSubtitle(e.target.value)}
-                  placeholder="Washington State University"
+                  placeholder="2025–2026 application cycle"
                   className="mt-1.5 w-full rounded-lg border border-wsu-gray/25 bg-wsu-cream px-3 py-2 text-sm text-wsu-gray-dark shadow-inner focus:border-wsu-crimson focus:outline-none focus:ring-1 focus:ring-wsu-crimson"
                 />
+              </label>
+              <label className="block text-sm font-medium text-wsu-gray-dark sm:col-span-2">
+                Cycle value in program summary (optional override)
+                <input
+                  type="text"
+                  value={draftCycleDisplayOverride}
+                  disabled={saving}
+                  onChange={(e) => setDraftCycleDisplayOverride(e.target.value)}
+                  placeholder="Leave blank to use Cycle from the Excel export"
+                  className="mt-1.5 w-full rounded-lg border border-wsu-gray/25 bg-wsu-cream px-3 py-2 text-sm text-wsu-gray-dark shadow-inner focus:border-wsu-crimson focus:outline-none focus:ring-1 focus:ring-wsu-crimson"
+                />
+                <span className="mt-1 block text-xs font-normal text-wsu-gray">
+                  When Cycle is shown in the public program summary, this replaces the Excel Cycle
+                  text for every program.
+                </span>
               </label>
               <label className="block text-sm font-medium text-wsu-gray-dark sm:col-span-2">
                 Logo image URL (optional)
@@ -1311,8 +1506,7 @@ export default function AdminPublicationPage() {
         <div className="fixed inset-x-0 bottom-0 z-50 border-t border-wsu-gray/20 bg-white/95 px-4 py-4 shadow-[0_-8px_32px_rgba(0,0,0,0.12)] backdrop-blur-sm">
           <div className="mx-auto flex max-w-3xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-wsu-gray-dark">
-              You have unsaved changes. Save to update the{" "}
-              <strong className="text-wsu-crimson">public</strong> view.
+              You have unsaved changes. Save to update this publication’s public snapshot.
             </p>
             <div className="flex flex-wrap gap-2">
               <button

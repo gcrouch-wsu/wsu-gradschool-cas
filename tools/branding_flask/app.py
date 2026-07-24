@@ -887,7 +887,12 @@ def capture(profile: str):
     xlsx = Path(request.form.get("xlsx") or str(PROFILES[profile]["xlsx"])).expanduser()
     if not xlsx.is_absolute():
         xlsx = REPO_ROOT / xlsx
-    delay_ms = int(request.form.get("delay_ms") or "4500")
+    try:
+        delay_ms = int(request.form.get("delay_ms") or "4500")
+        if delay_ms < 0 or delay_ms > 120_000:
+            delay_ms = 4500
+    except (TypeError, ValueError):
+        delay_ms = 4500
     thread = threading.Thread(
         target=capture_and_upload,
         args=(profile, xlsx, delay_ms),

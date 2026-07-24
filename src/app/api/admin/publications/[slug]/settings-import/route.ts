@@ -32,12 +32,15 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  let patch;
+  let parsed;
   try {
-    patch = parsePublicationSettingsImport(body);
+    parsed = parsePublicationSettingsImport(body, slug);
   } catch (e) {
     if (e instanceof ZodError) {
-      return NextResponse.json({ error: "Invalid settings file", details: e.flatten() }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid settings file", details: e.flatten() },
+        { status: 400 }
+      );
     }
     const msg = e instanceof Error ? e.message : "Invalid settings file";
     return NextResponse.json({ error: msg }, { status: 400 });
@@ -45,7 +48,7 @@ export async function POST(
 
   const { patch: sanitized, droppedDefaultGroupKey } = sanitizePublicationSettingsPatch(
     row,
-    patch
+    parsed.patch
   );
   let updated;
   try {
@@ -63,5 +66,11 @@ export async function POST(
     ok: true,
     slug: updated.slug,
     droppedDefaultGroupKey,
+    warnings: {
+      versionMismatch: parsed.meta.versionMismatch,
+      sourceSlugDiffers: parsed.meta.sourceSlugDiffers,
+      exportVersion: parsed.meta.exportVersion,
+      sourceSlug: parsed.meta.sourceSlug,
+    },
   });
 }

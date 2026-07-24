@@ -595,11 +595,39 @@ export function mergePublicationData(
       map.set(g.groupKey, cloneGroup(g));
       continue;
     }
-    const pidSeen = new Set(ex.offerings.map((o) => o.programId));
+    const byPid = new Map(ex.offerings.map((o) => [o.programId, o] as const));
     for (const o of g.offerings) {
-      if (!pidSeen.has(o.programId)) {
-        ex.offerings.push({ ...o, termParts: [...o.termParts] });
-        pidSeen.add(o.programId);
+      const prev = byPid.get(o.programId);
+      if (!prev) {
+        const next = { ...o, termParts: [...o.termParts] };
+        ex.offerings.push(next);
+        byPid.set(o.programId, next);
+        continue;
+      }
+      // Same Program ID: refresh term/deadline fields from the newer workbook.
+      prev.termLine = o.termLine;
+      prev.varying = { ...o.varying };
+      prev.termParts = [...o.termParts];
+      if (o.sourceProfile) prev.sourceProfile = o.sourceProfile;
+    }
+    // Recompute shared/varying across all offerings in the group after merge.
+    const attrRows: Record<string, string>[] = ex.offerings.map((o) => {
+      const row: Record<string, string> = { ...ex.shared, ...o.varying };
+      for (const part of o.termParts) {
+        if (!(part.key in row)) row[part.key] = part.value;
+      }
+      return row;
+    });
+    if (attrRows.length > 0) {
+      const shared = computeShared(attrRows);
+      ex.shared = shared;
+      for (let i = 0; i < ex.offerings.length; i++) {
+        const row = attrRows[i];
+        if (!row) continue;
+        ex.offerings[i] = {
+          ...ex.offerings[i]!,
+          varying: computeVarying(row, shared),
+        };
       }
     }
     ex.questions = dedupeQuestions([...ex.questions, ...g.questions]);

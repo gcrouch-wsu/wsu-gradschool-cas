@@ -19,6 +19,7 @@ import {
   DEFAULT_PUBLIC_HERO_EYEBROW,
 } from "./public-page-defaults";
 import { cleanProgramDisplayName } from "./program-display";
+import { sanitizePublicHref, sanitizePublicImageSrc } from "./safe-url";
 import {
   defaultVisibleColumns,
   ensurePublicationColumnMetadata,
@@ -35,6 +36,9 @@ import {
 const BLOB_PREFIX = "cas-publications";
 const CURRENT_VIEW_PATHNAME = `${BLOB_PREFIX}/_current-view.json`;
 const CAPTURE_MANIFEST_PATHNAME = "cas-branding-capture/current.json";
+function captureManifestPathForSlug(slug: string): string {
+  return `cas-branding-capture/${slug}.json`;
+}
 const DEFAULT_BRANDING_PROFILES = ["gradcas", "engineeringcas"];
 
 type BrandingCaptureProfileManifest = {
@@ -82,6 +86,11 @@ export type StoredPublicationBlob = {
   public_hero_body?: string;
   /** Suffixes removed from end of each program’s display name on the public page. */
   program_display_name_strip_suffixes?: string[];
+  /**
+   * When set, replaces the Cycle value in public summary fields.
+   * Empty string means use the Excel Cycle value.
+   */
+  cycle_display_override?: string;
   data: CasPublicationData;
   created_at: string;
   updated_at: string;
@@ -106,6 +115,7 @@ export type PublicationRow = {
   public_hero_eyebrow: string;
   public_hero_body: string;
   program_display_name_strip_suffixes: string[];
+  cycle_display_override: string;
   data: CasPublicationData;
   created_at: string;
   updated_at: string;
@@ -126,11 +136,17 @@ type CurrentViewBlob = {
 };
 
 export function resolvePublicationPublicHeader(row: PublicationRow): PublicationPublicHeader {
+  const logoRaw = row.public_header_logo_url.trim();
+  const rawTitle = row.public_header_title.trim();
+  const legacyTitles = new Set(["Program Questions & Options", "CAS program viewer"]);
   return {
-    title: row.public_header_title.trim() || DEFAULT_PUBLIC_HEADER_TITLE,
+    title: !rawTitle || legacyTitles.has(rawTitle) ? DEFAULT_PUBLIC_HEADER_TITLE : rawTitle,
     subtitle: row.public_header_subtitle.trim() || DEFAULT_PUBLIC_HEADER_SUBTITLE,
-    logoUrl: row.public_header_logo_url.trim() ? row.public_header_logo_url.trim() : null,
-    titleHref: row.public_header_title_href.trim() || DEFAULT_PUBLIC_HEADER_TITLE_HREF,
+    logoUrl: logoRaw ? sanitizePublicImageSrc(logoRaw) : null,
+    titleHref: sanitizePublicHref(
+      row.public_header_title_href.trim() || DEFAULT_PUBLIC_HEADER_TITLE_HREF,
+      DEFAULT_PUBLIC_HEADER_TITLE_HREF
+    ),
   };
 }
 
@@ -200,6 +216,8 @@ function blobToRow(parsed: StoredPublicationBlob): PublicationRow {
       typeof parsed.public_hero_eyebrow === "string" ? parsed.public_hero_eyebrow : "",
     public_hero_body: typeof parsed.public_hero_body === "string" ? parsed.public_hero_body : "",
     program_display_name_strip_suffixes,
+    cycle_display_override:
+      typeof parsed.cycle_display_override === "string" ? parsed.cycle_display_override : "",
     data,
     created_at: parsed.created_at,
     updated_at: parsed.updated_at,
@@ -288,13 +306,35 @@ async function buildBrandingCaptureManifest(body: StoredPublicationBlob): Promis
 async function persistBrandingCaptureManifest(body: StoredPublicationBlob): Promise<void> {
   const token = requireBlobToken();
   const manifest = await buildBrandingCaptureManifest(body);
-  await put(CAPTURE_MANIFEST_PATHNAME, JSON.stringify(manifest, null, 2), {
+  const json = JSON.stringify(manifest, null, 2);
+  const opts = {
     access: getBlobAccessMode(),
     token,
     addRandomSuffix: false,
     allowOverwrite: true,
-    contentType: "application/json",
-  });
+    contentType: "application/json" as const,
+  };
+  // Per-publication path plus current pointer for the local capture app.
+  await put(captureManifestPathForSlug(body.slug), json, opts);
+  await put(CAPTURE_MANIFEST_PATHNAME, json, opts);
+}
+
+function applyCycleDisplayOverride(
+  shared: Record<string, string>,
+  override: string
+): Record<string, string> {
+  const trimmed = override.trim();
+  if (!trimmed) return shared;
+  const out: Record<string, string> = { ...shared };
+  let found = false;
+  for (const k of Object.keys(out)) {
+    if (k.trim().toLowerCase() === "cycle") {
+      out[k] = trimmed;
+      found = true;
+    }
+  }
+  if (!found) out.Cycle = trimmed;
+  return out;
 }
 
 function departmentNameFromShared(shared: Record<string, string>): string | undefined {
@@ -312,13 +352,15 @@ function mapToPublicGroup(
   questionKeys: string[],
   answerKeys: string[],
   documentKeys: string[],
-  programStripSuffixes: string[]
+  programStripSuffixes: string[],
+  cycleDisplayOverride: string
 ): PublicProgramGroup {
+  const shared = applyCycleDisplayOverride(g.shared, cycleDisplayOverride);
   return {
     groupKey: g.groupKey,
     displayName: cleanProgramDisplayName(g.displayName, programStripSuffixes),
     departmentName: departmentNameFromShared(g.shared),
-    visibleShared: pickVisibleShared(g.shared, visibleColumnKeys),
+    visibleShared: pickVisibleShared(shared, visibleColumnKeys),
     offerings: g.offerings,
     recommendations: g.recommendations,
     recommendationNote: g.recommendationNote,
@@ -389,8 +431,17 @@ export function toPublicPayload(row: PublicationRow): PublicPublicationPayload {
     visibleDocumentColumnKeys: dk,
     orgQuestions: showOrg ? data.orgQuestions : [],
     orgAnswers: showOrg ? data.orgAnswers : [],
-    groups: data.groups.map((g) => mapToPublicGroup(g, keys, qk, ak, dk, strip)),
+    groups: data.groups.map((g) =>
+      mapToPublicGroup(g, keys, qk, ak, dk, strip, row.cycle_display_override)
+    ),
   };
+}
+
+export class PublicationStorageError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "PublicationStorageError";
+  }
 }
 
 export async function getPublicationBySlug(
@@ -401,7 +452,7 @@ export async function getPublicationBySlug(
   }
   const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
   if (!token) {
-    return null;
+    throw new PublicationStorageError("BLOB_READ_WRITE_TOKEN is not set.");
   }
   const pathname = publicationPathname(slug);
   const access = getBlobAccessMode();
@@ -428,8 +479,15 @@ export async function getPublicationBySlug(
       ...row,
       data: dataWithBranding,
     };
-  } catch {
-    return null;
+  } catch (e) {
+    if (e instanceof PublicationStorageError) throw e;
+    // Missing blob is often surfaced as an error from the SDK — treat as not found
+    // when the message looks like a 404; otherwise rethrow as storage failure.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/not found|404|NoSuchKey|does not exist/i.test(msg)) {
+      return null;
+    }
+    throw new PublicationStorageError(`Failed to load publication ${slug}`, { cause: e });
   }
 }
 
@@ -511,6 +569,7 @@ export async function createPublication(input: {
     public_hero_eyebrow: "",
     public_hero_body: "",
     program_display_name_strip_suffixes: ui.program_display_name_strip_suffixes,
+    cycle_display_override: "",
     data,
     created_at: now,
     updated_at: now,
@@ -523,6 +582,14 @@ export async function createPublication(input: {
 function validateSubset(keys: string[] | undefined, allowed: Set<string>): string[] {
   if (!keys) return [];
   return keys.filter((k) => allowed.has(k));
+}
+
+/** Explicitly point home /view at this publication (does not rewrite on ordinary saves). */
+export async function setCurrentViewPublication(slug: string): Promise<PublicationRow | null> {
+  const existing = await getPublicationBySlug(slug);
+  if (!existing) return null;
+  await persistCurrentView(slug);
+  return existing;
 }
 
 export async function updatePublication(
@@ -544,6 +611,9 @@ export async function updatePublication(
     publicHeroEyebrow?: string;
     publicHeroBody?: string;
     programDisplayNameStripSuffixes?: string[];
+    cycleDisplayOverride?: string;
+    /** When true, also make this publication the home /view target. */
+    setAsCurrentView?: boolean;
   }
 ): Promise<PublicationRow | null> {
   const existing = await getPublicationBySlug(slug);
@@ -644,6 +714,10 @@ export async function updatePublication(
       .filter(Boolean)
       .slice(0, 100);
   }
+  let cycle_display_override = existing.cycle_display_override;
+  if (patch.cycleDisplayOverride !== undefined) {
+    cycle_display_override = patch.cycleDisplayOverride.slice(0, 200);
+  }
 
   const now = new Date().toISOString();
   const body: StoredPublicationBlob = {
@@ -661,6 +735,7 @@ export async function updatePublication(
     public_hero_eyebrow,
     public_hero_body,
     program_display_name_strip_suffixes,
+    cycle_display_override,
     visible_question_columns,
     visible_answer_columns,
     visible_document_columns,
@@ -670,7 +745,9 @@ export async function updatePublication(
     updated_at: now,
   };
   await persistBlob(body);
-  await persistCurrentView(existing.slug);
+  if (patch.setAsCurrentView) {
+    await persistCurrentView(existing.slug);
+  }
   await persistBrandingCaptureManifest(body);
   return getPublicationBySlug(slug);
 }
@@ -745,12 +822,12 @@ export async function mergePublicationFromUpload(
     public_hero_eyebrow: existing.public_hero_eyebrow,
     public_hero_body: existing.public_hero_body,
     program_display_name_strip_suffixes: existing.program_display_name_strip_suffixes,
+    cycle_display_override: existing.cycle_display_override,
     data: stripLocalBrandingData(merged),
     created_at: existing.created_at,
     updated_at: now,
   };
   await persistBlob(body);
-  await persistCurrentView(existing.slug);
   await persistBrandingCaptureManifest(body);
   return getPublicationBySlug(slug);
 }

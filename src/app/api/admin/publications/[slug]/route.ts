@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getPublicationBySlug, updatePublication } from "@/lib/cas-store";
+import {
+  getCurrentViewSlug,
+  getPublicationBySlug,
+  updatePublication,
+} from "@/lib/cas-store";
 import { unauthorizedIfNotAdmin } from "@/lib/require-admin";
 
 export const runtime = "nodejs";
@@ -29,24 +33,12 @@ const patchSchema = z.object({
   publicHeroEyebrow: z.string().max(200).optional(),
   publicHeroBody: z.string().max(20000).optional(),
   programDisplayNameStripSuffixes: z.array(z.string().max(200)).max(100).optional(),
+  cycleDisplayOverride: z.string().max(200).optional(),
+  setAsCurrentView: z.boolean().optional(),
 });
 
-export async function GET(
-  _request: Request,
-  ctx: { params: Promise<{ slug: string }> }
-) {
-  const deny = await unauthorizedIfNotAdmin();
-  if (deny) return deny;
-  if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
-    return NextResponse.json(
-      { error: "BLOB_READ_WRITE_TOKEN is not set. Link a Blob store to this project." },
-      { status: 500 }
-    );
-  }
-  const { slug } = await ctx.params;
-  const row = await getPublicationBySlug(slug);
-  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json({
+function rowToAdminJson(row: NonNullable<Awaited<ReturnType<typeof getPublicationBySlug>>>) {
+  return {
     slug: row.slug,
     title: row.title,
     visibleColumnKeys: row.visible_columns,
@@ -68,11 +60,60 @@ export async function GET(
     publicHeroEyebrow: row.public_hero_eyebrow,
     publicHeroBody: row.public_hero_body,
     programDisplayNameStripSuffixes: row.program_display_name_strip_suffixes,
+    cycleDisplayOverride: row.cycle_display_override,
     groupKeys: row.data.groups.map((g) => ({
       key: g.groupKey,
       label: g.displayName,
     })),
     sourceFileName: row.data.sourceFileName,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function GET(
+  _request: Request,
+  ctx: { params: Promise<{ slug: string }> }
+) {
+  const deny = await unauthorizedIfNotAdmin();
+  if (deny) return deny;
+  if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+    return NextResponse.json(
+      { error: "BLOB_READ_WRITE_TOKEN is not set. Link a Blob store to this project." },
+      { status: 500 }
+    );
+  }
+  const { slug } = await ctx.params;
+  let row;
+  try {
+    row = await getPublicationBySlug(slug);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Storage error";
+    return NextResponse.json({ error: msg }, { status: 503 });
+  }
+  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const currentViewSlug = await getCurrentViewSlug();
+  let currentView: { slug: string; title: string; updatedAt: string } | null = null;
+  if (currentViewSlug && currentViewSlug !== slug) {
+    try {
+      const live = await getPublicationBySlug(currentViewSlug);
+      if (live) {
+        currentView = {
+          slug: live.slug,
+          title: live.title,
+          updatedAt: live.updated_at,
+        };
+      }
+    } catch {
+      currentView = { slug: currentViewSlug, title: "(unavailable)", updatedAt: "" };
+    }
+  }
+
+  return NextResponse.json({
+    ...rowToAdminJson(row),
+    isCurrentView: currentViewSlug === slug,
+    currentViewSlug,
+    currentView,
   });
 }
 
@@ -97,7 +138,7 @@ export async function PATCH(
   }
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ error: "Invalid request", details: parsed.error.flatten() }, { status: 400 });
   }
   let updated;
   try {
@@ -110,23 +151,10 @@ export async function PATCH(
     return NextResponse.json({ error: msg }, { status: 500 });
   }
   if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const currentViewSlug = await getCurrentViewSlug();
   return NextResponse.json({
-    slug: updated.slug,
-    title: updated.title,
-    visibleColumnKeys: updated.visible_columns,
-    defaultGroupKey: updated.default_group_key,
-    showOrgOnPublic: updated.show_org_on_public,
-    showProgramIdOnPublic: updated.show_program_id_on_public,
-    visibleQuestionColumns: updated.visible_question_columns,
-    visibleAnswerColumns: updated.visible_answer_columns,
-    visibleDocumentColumns: updated.visible_document_columns,
-    termFieldSettings: updated.term_field_settings,
-    publicHeaderTitle: updated.public_header_title,
-    publicHeaderSubtitle: updated.public_header_subtitle,
-    publicHeaderLogoUrl: updated.public_header_logo_url,
-    publicHeaderTitleHref: updated.public_header_title_href,
-    publicHeroEyebrow: updated.public_hero_eyebrow,
-    publicHeroBody: updated.public_hero_body,
-    programDisplayNameStripSuffixes: updated.program_display_name_strip_suffixes,
+    ...rowToAdminJson(updated),
+    isCurrentView: currentViewSlug === updated.slug,
+    currentViewSlug,
   });
 }

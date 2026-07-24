@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { sanitizePublicHref, sanitizePublicImageSrc } from "@/lib/safe-url";
 
 type Props = {
   title: string;
@@ -8,8 +9,8 @@ type Props = {
 };
 
 export function PublicPublicationHeader({ title, subtitle, logoUrl, titleHref }: Props) {
-  const href = titleHref.trim() || "/";
-  const logo = logoUrl?.trim() || null;
+  const href = sanitizePublicHref(titleHref.trim() || "/", "/");
+  const logo = logoUrl ? sanitizePublicImageSrc(logoUrl) : null;
 
   return (
     <header className="border-b border-wsu-crimson-dark/20 bg-wsu-crimson text-white shadow-md">
@@ -33,6 +34,12 @@ export function PublicPublicationHeader({ title, subtitle, logoUrl, titleHref }:
           </Link>
           <p className="text-xs font-medium uppercase tracking-widest text-white/70">{subtitle}</p>
         </div>
+        <Link
+          href="/admin"
+          className="shrink-0 self-start rounded-md border border-white/25 bg-white/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-white/20 sm:self-center"
+        >
+          Sign in
+        </Link>
       </div>
     </header>
   );

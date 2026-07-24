@@ -9,8 +9,8 @@ const sourceSans = Source_Sans_3({
 });
 
 export const metadata: Metadata = {
-  title: "CAS program viewer | Washington State University",
-  description: "Publish CAS exports to a public program summary page.",
+  title: "GradCAS and EngineeringCAS Applications | Washington State University",
+  description: "Publish GradCAS and EngineeringCAS program summaries for applicants.",
 };
 
 export default function RootLayout({

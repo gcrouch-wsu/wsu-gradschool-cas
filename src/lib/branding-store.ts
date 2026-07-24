@@ -101,15 +101,13 @@ async function readJson<T>(filePath: string): Promise<T | null> {
   }
 }
 
-function hasBlobToken(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
-}
-
 async function readBlobJson<T>(pathname: string): Promise<T | null> {
-  if (!hasBlobToken()) return null;
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!token) return null;
   try {
     const result = await get(pathname, {
       access: getBlobAccessMode(),
+      token,
       useCache: false,
     });
     if (!result || result.statusCode !== 200 || !result.stream) return null;

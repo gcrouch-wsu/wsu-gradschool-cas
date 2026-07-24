@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getPublicationBySlug } from "@/lib/cas-store";
 import { buildPublicationSettingsExport } from "@/lib/publication-settings-snapshot";
 import { unauthorizedIfNotAdmin } from "@/lib/require-admin";
+import { settingsExportFilename } from "@/lib/settings-filename";
 
 export const runtime = "nodejs";
 
@@ -23,12 +24,13 @@ export async function GET(
 
   const payload = buildPublicationSettingsExport(row);
   const body = `${JSON.stringify(payload, null, 2)}\n`;
-  const filename = `cas-publication-settings-${slug}.json`;
+  const filename = settingsExportFilename(slug, row.title);
   return new NextResponse(body, {
     status: 200,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Content-Disposition": `attachment; filename="${filename}"`,
+      "X-Suggested-Filename": filename,
     },
   });
 }

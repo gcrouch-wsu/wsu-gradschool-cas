@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
-import { getPublicationBySlug, toPublicPayload } from "@/lib/cas-store";
+import { getPublicationBySlug, PublicationStorageError, toPublicPayload } from "@/lib/cas-store";
 
 export const runtime = "nodejs";
+
+const CACHE_HEADERS = {
+  "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+};
 
 export async function GET(
   _request: Request,
@@ -14,7 +18,14 @@ export async function GET(
     );
   }
   const { slug } = await ctx.params;
-  const row = await getPublicationBySlug(slug);
-  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(toPublicPayload(row));
+  try {
+    const row = await getPublicationBySlug(slug);
+    if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json(toPublicPayload(row), { headers: CACHE_HEADERS });
+  } catch (e) {
+    if (e instanceof PublicationStorageError) {
+      return NextResponse.json({ error: e.message }, { status: 503 });
+    }
+    throw e;
+  }
 }

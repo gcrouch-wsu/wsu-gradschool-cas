@@ -2,11 +2,12 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { sanitizeNextPath } from "@/lib/safe-url";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") || "/admin";
+  const nextPath = sanitizeNextPath(searchParams.get("next"), "/admin");
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -29,7 +30,7 @@ function LoginForm() {
         setError(body.error ?? "Login failed");
         return;
       }
-      router.push(nextPath.startsWith("/") ? nextPath : "/admin");
+      router.push(nextPath);
       router.refresh();
     } catch {
       setError("Network error");
