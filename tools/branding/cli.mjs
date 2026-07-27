@@ -13,9 +13,8 @@ const defaultAuthFile = path.join(repoRoot, "tools", "branding", ".auth", "user.
 const defaultTrailFile = path.join(repoRoot, "tools", "branding", ".auth", "trail.json");
 const defaultOutputDir = path.join(repoRoot, "tools", "branding", "output");
 const defaultBrandingDataRoot = path.join(repoRoot, ".branding-data");
-const defaultBaseUrl =
-  "https://configuration.prelaunch.cas.myliaison.com/configuration/assets/index.html#!/programBranding";
-const defaultLoginUrl = "https://prelaunch.webadmit.org/";
+const defaultBaseUrl = "";
+const defaultLoginUrl = "https://webadmit.org/";
 const defaultChannel = "msedge";
 const programIdPlaceholder = "__PROGRAM_ID__";
 
@@ -217,7 +216,11 @@ function buildSettings(opts) {
     command: opts.command,
     profile,
     baseUrl: opts.baseUrl || process.env.BRANDING_BASE_URL || defaultBaseUrl,
-    loginUrl: opts.loginUrl || process.env.BRANDING_LOGIN_URL || defaultLoginUrl,
+    loginUrl:
+      opts.loginUrl ||
+      process.env.BRANDING_START_URL ||
+      process.env.BRANDING_LOGIN_URL ||
+      defaultLoginUrl,
     authFile: resolveFilePath(
       opts.authFile || process.env.BRANDING_AUTH_FILE || "",
       authFallback
@@ -311,7 +314,7 @@ async function login(settings) {
     await page.goto(settings.loginUrl, { waitUntil: "domcontentloaded" });
     console.log(`Opened login page ${settings.loginUrl}`);
     console.log("Complete login, MFA, and any prompts in the browser window.");
-    console.log(`After login, make sure you can open a branding page such as ${settings.baseUrl}/547960.`);
+    console.log("After login, make sure you can open a live-cycle Branding page.");
     await awaitUserCompletion(
       "Press Enter here after you are fully logged in and the portal is working...",
       page,
@@ -369,15 +372,36 @@ async function loadJson(filePath) {
 }
 
 function isRelevantTrailUrl(url) {
-  return (
-    url.includes("configuration.prelaunch.cas.myliaison.com") ||
-    url.includes("prelaunch.webadmit.org")
-  );
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return (
+      hostname === "webadmit.org" ||
+      hostname.endsWith(".webadmit.org") ||
+      hostname === "myliaison.com" ||
+      hostname.endsWith(".myliaison.com")
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isBrandingTrailUrl(url) {
   const lower = String(url || "").toLowerCase();
   return isRelevantTrailUrl(url) && lower.includes("branding");
+}
+
+function urlOrigin(value) {
+  try {
+    return new URL(value).origin.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function trailMatchesStartUrl(trail, settings) {
+  const trailOrigin = urlOrigin(trail?.loginUrl);
+  const startOrigin = urlOrigin(settings.loginUrl);
+  return !trailOrigin || !startOrigin || trailOrigin === startOrigin;
 }
 
 function urlStringsFromEntries(entries) {
@@ -466,7 +490,13 @@ function resolveProgramCaptureUrl(settings, trail, programId) {
     const resolved = resolveTemplateUrl(template, programId);
     if (resolved) return resolved;
   }
-  return `${settings.baseUrl.replace(/\/$/, "")}/${encodeURIComponent(programId)}`;
+  const baseUrl = settings.baseUrl.trim();
+  if (baseUrl) {
+    return `${baseUrl.replace(/\/$/, "")}/${encodeURIComponent(programId)}`;
+  }
+  throw new Error(
+    "No recorded Program ID URL pattern found. Run guided login after opening a live-cycle Branding page, or set BRANDING_BASE_URL."
+  );
 }
 
 async function recordTrail(settings) {
@@ -578,6 +608,10 @@ async function openBrandingTabIfNeeded(page, settings) {
 async function followRecordedTrail(page, settings) {
   try {
     const trail = await loadJson(settings.trailFile);
+    if (!trailMatchesStartUrl(trail, settings)) {
+      console.log("Saved trail was recorded for a different start URL; skipping it.");
+      return null;
+    }
     const entries = Array.isArray(trail.entries) ? trail.entries : [];
     const usable = entries
       .map((entry) => (entry && typeof entry.url === "string" ? entry.url : ""))
@@ -821,7 +855,7 @@ async function exportBranding(settings, opts) {
     if (trail?.brandingUrlTemplate || trail?.programUrlTemplate) {
       console.log(`Using recorded program URL template: ${trail.brandingUrlTemplate || trail.programUrlTemplate}`);
     } else {
-      console.log("No recorded program URL template found; using BRANDING_BASE_URL fallback.");
+      console.log("No recorded program URL template found; using configured base URL fallback if available.");
     }
     for (let index = 0; index < ids.length; index += 1) {
       const id = ids[index];

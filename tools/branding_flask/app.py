@@ -72,8 +72,8 @@ def process_env() -> dict[str, str]:
     return env
 
 
-def branding_login_url(env: dict[str, str]) -> str:
-    return env.get("BRANDING_LOGIN_URL", "https://prelaunch.webadmit.org/").strip()
+def branding_start_url(env: dict[str, str]) -> str:
+    return env.get("BRANDING_START_URL", "https://webadmit.org/").strip()
 
 
 def blob_token_source(env: dict[str, str]) -> str:
@@ -413,6 +413,8 @@ def start_thread(profile: str, label: str, command: list[str]) -> None:
 
 
 def capture_and_upload(profile: str, xlsx_path: Path, delay_ms: int) -> None:
+    env = process_env()
+    start_url = branding_start_url(env)
     snapshot_id = datetime.now(timezone.utc).isoformat().replace(":", "-").replace(".", "-")
     output_dir = snapshot_root(snapshot_id, profile)
     status_file = status_path(profile)
@@ -434,6 +436,8 @@ def capture_and_upload(profile: str, xlsx_path: Path, delay_ms: int) -> None:
         str(trail_file),
         "--status-file",
         str(status_file),
+        "--login-url",
+        start_url,
         "--delay-ms",
         str(delay_ms),
         "--non-interactive",
@@ -466,7 +470,7 @@ def capture_and_upload(profile: str, xlsx_path: Path, delay_ms: int) -> None:
     result = subprocess.run(
         export_command,
         cwd=REPO_ROOT,
-        env=process_env(),
+        env=env,
         text=True,
         capture_output=True,
         check=False,
@@ -484,7 +488,7 @@ def capture_and_upload(profile: str, xlsx_path: Path, delay_ms: int) -> None:
     upload = subprocess.run(
         upload_command,
         cwd=REPO_ROOT,
-        env=process_env(),
+        env=env,
         text=True,
         capture_output=True,
         check=False,
@@ -784,13 +788,13 @@ def index() -> str:
       <h2>Shared settings</h2>
       <div class="meta">
         <span class="pill">Blob token: {token_status}</span>
-        <span><strong>Prelaunch login URL:</strong> {escape(branding_login_url(env))}</span>
+        <span><strong>WebAdMIT / CAS start URL:</strong> {escape(branding_start_url(env))}</span>
       </div>
-      <form method="post" action="{url_for('save_prelaunch_url', profile=active_profile)}">
-        <label for="prelaunch-url">Prelaunch WebAdMIT URL</label>
-        <input id="prelaunch-url" name="prelaunch_url" value="{escape(branding_login_url(env))}">
+      <form method="post" action="{url_for('save_start_url', profile=active_profile)}">
+        <label for="start-url">WebAdMIT / CAS start URL</label>
+        <input id="start-url" name="start_url" value="{escape(branding_start_url(env))}">
         <div class="actions">
-          <button type="submit" class="secondary">Save prelaunch URL</button>
+          <button type="submit" class="secondary">Save URL</button>
         </div>
       </form>
       <form method="post" action="{url_for('save_blob_token', profile=active_profile)}">
@@ -816,11 +820,11 @@ def save_blob_token():
     return profile_redirect(selected_profile())
 
 
-@app.post("/settings/prelaunch-url")
-def save_prelaunch_url():
-    value = (request.form.get("prelaunch_url") or "").strip()
+@app.post("/settings/start-url")
+def save_start_url():
+    value = (request.form.get("start_url") or "").strip()
     if value:
-        save_env_value(REPO_ROOT / ".env.local", "BRANDING_LOGIN_URL", value)
+        save_env_value(REPO_ROOT / ".env.local", "BRANDING_START_URL", value)
     return profile_redirect(selected_profile())
 
 
@@ -836,6 +840,7 @@ def load_manifest():
 def guide(profile: str):
     if profile not in PROFILES:
         return "Unknown profile", 404
+    env = process_env()
     command = [
         "node",
         "tools/branding/cli.mjs",
@@ -848,6 +853,8 @@ def guide(profile: str):
         str(profile_root(profile) / "trail.json"),
         "--status-file",
         str(status_path(profile)),
+        "--login-url",
+        branding_start_url(env),
         "--non-interactive",
     ]
     start_thread(profile, "guide", command)

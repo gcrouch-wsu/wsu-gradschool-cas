@@ -38,13 +38,14 @@ Use the profile switcher to choose either GradCAS or EngineeringCAS. Run one pro
 
 1. Select the Excel report and save it in the local app.
 2. Confirm the saved file path appears as the current Excel report.
-3. Click `Open guided login`.
-4. In the browser that opens, log into WebAdMIT.
-5. Navigate to `CAS Configuration Portal`, then the correct CAS and live cycle.
-6. Click `Details` for a program, then click `Branding`, and wait until the Branding page is visible.
-7. Repeat that Details -> Branding path for 2 or 3 programs if possible.
-8. Close the browser window while it is still on a Branding page. This saves your login, live-cycle route, and Program ID URL pattern.
-9. Click `Capture and upload`.
+3. Enter the WebAdMIT/CAS start URL for the environment you want to capture and save it.
+4. Click `Open guided login`.
+5. In the browser that opens, log into WebAdMIT.
+6. Navigate to `CAS Configuration Portal`, then the correct CAS and live cycle.
+7. Click `Details` for a program, then click `Branding`, and wait until the Branding page is visible.
+8. Repeat that Details -> Branding path for 2 or 3 programs if possible.
+9. Close the browser window while it is still on a Branding page. This saves your login, live-cycle route, and Program ID URL pattern.
+10. Click `Capture and upload`.
 
 Only use `Upload latest completed snapshot` if capture finished locally but the automatic Blob upload did not complete.
 
@@ -53,6 +54,7 @@ When capture finishes, the latest snapshot is available to the deployed app thro
 ## Notes
 
 - Run `gradcas` and `engineeringcas` separately because the login trail has to land in the correct CAS portal context.
+- Run guided login again whenever you change the saved start URL, because each environment needs its own saved route.
 - Branding image asset upload is optional; the primary output is normalized private JSON.
 - Branding JSON is uploaded using `CAS_BLOB_ACCESS`, which defaults to private.
 - Empty shell captures are retained and marked as `empty_shell`; they do not stop the run.

@@ -38,10 +38,10 @@ The script saves:
 - auth state to `tools/branding/.auth/user.json`
 - navigation trail to `tools/branding/.auth/trail.json`
 
-Default login page:
+Default start page:
 
 ```text
-https://prelaunch.webadmit.org/
+https://webadmit.org/
 ```
 
 ## Record your manual portal path separately
@@ -101,11 +101,7 @@ Slower run with an extra pause after each page loads:
 npm run branding:export -- --xlsx GradCAS.xlsx --xlsx EngCAS.xlsx --delay-ms 4000
 ```
 
-By default, the scraper reads the `Program Attributes` sheet and extracts the `Program ID` column. Guided login records the live-cycle Program ID URL pattern and export swaps each ID into that recorded route. If no live-cycle pattern has been recorded, it falls back to the older direct branding URL shape:
-
-```text
-https://configuration.prelaunch.cas.myliaison.com/configuration/assets/index.html#!/programBranding/547960
-```
+By default, the scraper reads the `Program Attributes` sheet and extracts the `Program ID` column. Guided login records the live-cycle Program ID URL pattern and export swaps each ID into that recorded route. If no live-cycle pattern has been recorded, set `BRANDING_BASE_URL` to an environment-specific branding root.
 
 Each run writes output under `tools/branding/output/<programId>/`.
 
@@ -113,6 +109,7 @@ Each run writes output under `tools/branding/output/<programId>/`.
 
 - The script uses your local Edge install by default via Playwright channel `msedge`.
 - If the saved session expires, run `npm run branding:login` again.
+- If you change `BRANDING_START_URL`, run guided login again so the saved route matches that environment.
 - If the portal needs extra organization/cycle clicks to establish context, run `npm run branding:record` and click through those pages once. Export runs will replay that trail.
 - By default, each program run clicks `Back to Organization` first when that link is available, then opens the next branding page. Use `--no-reset` if that turns out to be worse for your tenant.
 - The extraction is intentionally generic because the portal is login-protected and the field markup may vary. Inspect `branding.json` plus `page.html` to refine selectors later.
