@@ -663,9 +663,9 @@ export default function AdminPublicationPage() {
   async function deleteCycle() {
     if (!saved) return;
     const typed = window.prompt(
-      `Delete "${saved.title}" permanently?\n\nThis removes the cycle publication and its capture manifest from Blob storage. Type ${slug} to confirm.`
+      `Delete "${saved.title}" permanently?\n\nThis removes the cycle publication and its capture manifest from Blob storage. Type DELETE to confirm.`
     );
-    if (typed !== slug) return;
+    if (typed !== "DELETE") return;
 
     setDeleteBusy(true);
     setError(null);
@@ -1064,7 +1064,7 @@ export default function AdminPublicationPage() {
               onClick={() => void deleteCycle()}
               className="mt-4 rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-semibold text-red-800 shadow-sm hover:bg-red-100 disabled:pointer-events-none disabled:opacity-50"
             >
-              {deleteBusy ? "Deleting…" : "Delete this cycle"}
+              {deleteBusy ? "Deleting..." : "DELETE"}
             </button>
           </section>
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getCurrentViewPublication, listPublicationSummaries } from "@/lib/cas-store";
 import { AdminSignOutButton } from "@/components/AdminSignOutButton";
+import { AdminCycleList } from "./AdminCycleList";
 
 function formatPublicationDate(iso: string): string {
   try {
@@ -23,7 +24,7 @@ export default async function AdminHomePage() {
   ]);
 
   return (
-    <div className="mx-auto max-w-lg px-4 py-10">
+    <div className="mx-auto max-w-4xl px-4 py-10">
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-wsu-gray-dark">Admin</h1>
@@ -91,61 +92,7 @@ export default async function AdminHomePage() {
         </section>
 
         {publications.length > 0 ? (
-          <section className="rounded-2xl border border-wsu-gray/10 bg-white p-6 shadow-sm">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-wsu-gray">
-              Cycles
-            </h2>
-            <p className="mt-2 text-sm leading-relaxed text-wsu-gray">
-              Open a cycle to update settings or delete it. The live home cycle must be changed
-              before it can be deleted.
-            </p>
-            <div className="mt-4 divide-y divide-wsu-gray/10">
-              {publications.map((publication) => {
-                const isLive = current?.slug === publication.slug;
-                return (
-                  <div key={publication.slug} className="py-4 first:pt-0 last:pb-0">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-semibold text-wsu-gray-dark">
-                            {publication.title}
-                          </p>
-                          {isLive ? (
-                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900">
-                              Live
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="mt-1 text-xs text-wsu-gray">
-                          Updated {formatPublicationDate(publication.updated_at)} ·{" "}
-                          {publication.groupCount} programs · {publication.offeringCount} offerings
-                        </p>
-                        <p className="mt-1 font-mono text-xs text-wsu-gray">
-                          slug: {publication.slug}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Link
-                          href={`/admin/${publication.slug}`}
-                          className="rounded-lg bg-wsu-gray-dark px-3 py-2 text-xs font-semibold text-white hover:bg-wsu-gray"
-                        >
-                          Open settings
-                        </Link>
-                        <Link
-                          href={`/s/${publication.slug}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rounded-lg border border-wsu-gray/20 bg-white px-3 py-2 text-xs font-medium text-wsu-gray-dark hover:bg-wsu-cream"
-                        >
-                          View snapshot
-                        </Link>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+          <AdminCycleList currentSlug={current?.slug ?? null} publications={publications} />
         ) : null}
       </div>
     </div>
