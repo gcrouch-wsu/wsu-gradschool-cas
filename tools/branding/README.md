@@ -105,6 +105,11 @@ npm run branding:export -- --xlsx GradCAS.xlsx --xlsx EngCAS.xlsx --delay-ms 400
 By default, the scraper reads the `Program Attributes` sheet and extracts the `Program ID` column. Guided login records the live-cycle Program ID URL pattern and export swaps each ID into that recorded route. If no live-cycle pattern has been recorded, set `BRANDING_BASE_URL` to an environment-specific branding root.
 
 Each run writes output under `tools/branding/output/<programId>/`.
+If a run is interrupted and started again with the same output folder, existing `branding.json` files are reused and those Program IDs are skipped.
+
+## Upload branding
+
+`tools/branding/upload-snapshot.mjs` uploads each Program ID independently and records progress in `upload-state.json`. If upload is interrupted, run the same upload command again and it skips Program IDs already uploaded. The `latest/<profile>.json` pointer is updated only after the full snapshot upload completes.
 
 ## Notes
 

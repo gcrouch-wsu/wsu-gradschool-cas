@@ -363,13 +363,13 @@ export default function PublicCasView({
       <div className="mb-8 flex flex-col gap-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end">
           <label className="min-w-[min(100%,260px)] flex-1 text-sm font-medium text-wsu-gray-dark">
-            Department
+            Department/College
             <select
               value={selectedDept}
               disabled={searchActive}
               title={
                 searchActive
-                  ? "Clear the search box to choose a department"
+                  ? "Clear the search box to choose a Department/College"
                   : undefined
               }
               onChange={(e) => setSelectedDept(e.target.value)}
@@ -424,14 +424,14 @@ export default function PublicCasView({
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by program name, group code, or Program ID (all departments)…"
+              placeholder="Search by program name, group code, or Program ID (all departments/colleges)…"
               className="mt-1.5 w-full rounded-lg border border-wsu-gray/20 bg-white px-3 py-2.5 text-base text-wsu-gray-dark shadow-sm placeholder:text-wsu-gray/60 focus:border-wsu-crimson focus:outline-none focus:ring-2 focus:ring-wsu-crimson/25"
             />
           </label>
         </div>
         {searchActive ? (
           <p className="text-xs text-wsu-gray">
-            Department is set from the program you select. Clear search to pick a department first.
+            Department/College is set from the program you select. Clear search to pick a Department/College first.
           </p>
         ) : null}
       </div>
@@ -440,7 +440,7 @@ export default function PublicCasView({
         <p className="rounded-lg border border-wsu-gray/15 bg-white px-4 py-6 text-wsu-gray">
           {searchActive
             ? "No programs match your search."
-            : "No programs in this department."}
+            : "No programs in this Department/College."}
         </p>
       ) : selected ? (
         <ProgramDetail

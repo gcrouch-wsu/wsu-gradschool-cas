@@ -387,6 +387,14 @@ async function loadJson(filePath) {
   return JSON.parse(text);
 }
 
+async function loadJsonIfExists(filePath) {
+  try {
+    return await loadJson(filePath);
+  } catch {
+    return null;
+  }
+}
+
 function isRelevantTrailUrl(url) {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
@@ -665,6 +673,29 @@ function readWorkbookProgramIds(filePath, sheetName) {
     .filter(Boolean);
 }
 
+function summaryFromCapturedPayload(payload, targetDir, id) {
+  const extracted = payload?.extracted ?? {};
+  return {
+    programId: String(payload?.programId || id),
+    pageUrl: payload?.pageUrl || extracted.url || "",
+    status: payload?.status || "error",
+    controlCount: extracted.controls?.length ?? 0,
+    imageCount: extracted.images?.length ?? 0,
+    backgroundImageCount: extracted.backgroundImages?.length ?? 0,
+    htmlBlockCount: extracted.htmlBlocks?.length ?? 0,
+    downloadedImageCount: payload?.downloadedImages?.length ?? 0,
+    folder: path.relative(repoRoot, targetDir),
+  };
+}
+
+async function existingCaptureSummary(targetDir, id) {
+  const payload = await loadJsonIfExists(path.join(targetDir, "branding.json"));
+  if (!payload) return null;
+  const programId = String(payload.programId || "").trim();
+  if (programId && programId !== String(id)) return null;
+  return summaryFromCapturedPayload(payload, targetDir, id);
+}
+
 async function readProgramIds(opts) {
   const ids = [...opts.ids];
   if (opts.idFile) {
@@ -851,14 +882,17 @@ async function exportBranding(settings, opts) {
   const snapshotId = path.basename(path.dirname(settings.outputDir)) === sanitizeName(settings.profile)
     ? path.basename(path.dirname(path.dirname(settings.outputDir)))
     : path.basename(path.dirname(settings.outputDir));
+  const manifestPath = path.join(settings.outputDir, "manifest.json");
+  const existingManifest = await loadJsonIfExists(manifestPath);
   const manifest = {
+    ...(existingManifest && typeof existingManifest === "object" ? existingManifest : {}),
     snapshotId,
     profile: settings.profile || "default",
-    createdAt: new Date().toISOString(),
+    createdAt: existingManifest?.createdAt || new Date().toISOString(),
     status: "running",
     outputDir: path.relative(repoRoot, settings.outputDir),
   };
-  await saveJson(path.join(settings.outputDir, "manifest.json"), manifest);
+  await saveJson(manifestPath, manifest);
   await updateStatus(settings, {
     mode: "export",
     status: "running",
@@ -877,12 +911,26 @@ async function exportBranding(settings, opts) {
     }
     for (let index = 0; index < ids.length; index += 1) {
       const id = ids[index];
+      const targetDir = path.join(settings.outputDir, sanitizeName(id));
+      await ensureDir(targetDir);
+      const existingSummary = await existingCaptureSummary(targetDir, id);
+      if (existingSummary) {
+        summary.push(existingSummary);
+        console.log(`Skipping ${id}; existing branding.json found.`);
+        await updateStatus(settings, {
+          mode: "export",
+          status: "running",
+          snapshotId,
+          completedPrograms: index + 1,
+          totalPrograms: ids.length,
+          message: `Reused existing capture for ${index + 1} of ${ids.length} Program IDs`,
+        });
+        continue;
+      }
       if (settings.resetEach) {
         await resetToOrganization(page, settings);
       }
       const url = resolveProgramCaptureUrl(settings, trail, id);
-      const targetDir = path.join(settings.outputDir, sanitizeName(id));
-      await ensureDir(targetDir);
       console.log(`Visiting ${url}`);
       await page.goto(url, { waitUntil: "domcontentloaded" });
       await page.waitForLoadState("networkidle").catch(() => {});

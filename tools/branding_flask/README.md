@@ -46,6 +46,9 @@ Use the profile switcher to choose either GradCAS or EngineeringCAS. Run one pro
 8. Repeat that Details -> Branding path for 2 or 3 programs if possible.
 9. Close the browser window while it is still on a Branding page. This saves your login, live-cycle route, and Program ID URL pattern.
 10. When the dashboard says the Branding route is ready, click `Start <profile> capture and upload`.
+11. When the dashboard says the branding upload is complete, you can close the dashboard window.
+
+If capture or upload is interrupted, click the same start button again. The tool reuses the saved snapshot, skips Program IDs that already have local captures, skips Program IDs already uploaded to Blob, and publishes the latest pointer only after the full upload completes.
 
 Only use `Upload latest completed snapshot` if capture finished locally but the automatic Blob upload did not complete.
 
@@ -55,6 +58,7 @@ When capture finishes, the latest snapshot is available to the deployed app thro
 
 - Run `gradcas` and `engineeringcas` separately because the login trail has to land in the correct CAS portal context.
 - Run guided login again whenever you change the saved start URL, because each environment needs its own saved route.
+- A completed upload is the point where it is safe to close the dashboard window.
 - Branding image asset upload is optional; the primary output is normalized private JSON.
 - Branding JSON is uploaded using `CAS_BLOB_ACCESS`, which defaults to private.
 - Empty shell captures are retained and marked as `empty_shell`; they do not stop the run.

@@ -41,6 +41,10 @@ Optional:
   --json-access public|private      Defaults to CAS_BLOB_ACCESS or private.
   --asset-access public|private     Defaults to CAS_BLOB_ACCESS/private.
   --upload-assets                   Also upload downloaded image assets.
+
+Uploads are resumable. Each Program ID is uploaded independently and recorded
+in upload-state.json. The latest pointer is updated only after the full snapshot
+has uploaded successfully.
 `);
 }
 
@@ -107,8 +111,54 @@ async function readJson(filePath) {
   return JSON.parse(await fs.readFile(filePath, "utf8"));
 }
 
+async function readJsonIfExists(filePath) {
+  try {
+    return await readJson(filePath);
+  } catch {
+    return null;
+  }
+}
+
+async function ensureDir(dirPath) {
+  await fs.mkdir(dirPath, { recursive: true });
+}
+
+async function saveJson(filePath, value) {
+  await ensureDir(path.dirname(filePath));
+  await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
+}
+
 function sanitizeName(value) {
   return String(value).replace(/[^a-zA-Z0-9._-]+/g, "_");
+}
+
+function uploadStatePath(snapshotDir) {
+  return path.join(snapshotDir, "upload-state.json");
+}
+
+async function readUploadState(snapshotDir) {
+  const state = await readJsonIfExists(uploadStatePath(snapshotDir));
+  return state && typeof state === "object" ? state : {};
+}
+
+async function writeUploadState(snapshotDir, state) {
+  await saveJson(uploadStatePath(snapshotDir), {
+    version: 1,
+    ...state,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function normalizedProgramPath(snapshotDir, programId) {
+  return path.join(snapshotDir, "programs", `${sanitizeName(programId)}.json`);
+}
+
+async function readNormalizedProgram(snapshotDir, programId) {
+  return readJsonIfExists(normalizedProgramPath(snapshotDir, programId));
+}
+
+async function writeNormalizedProgram(snapshotDir, program) {
+  await saveJson(normalizedProgramPath(snapshotDir, program.programId), program);
 }
 
 function resolveSnapshotDir(opts) {
@@ -169,6 +219,14 @@ async function uploadJson(pathname, value, access) {
     allowOverwrite: true,
     contentType: "application/json",
   });
+}
+
+async function uploadProgramJson(program, snapshotId, profile, access) {
+  return uploadJson(
+    `${blobPrefix}/${snapshotId}/${profile}/programs/${sanitizeName(program.programId)}.json`,
+    program,
+    access
+  );
 }
 
 async function uploadProgramAssets(payload, snapshotDir, snapshotId, profile, access) {
@@ -249,6 +307,7 @@ async function main() {
   const profile = sanitizeName(opts.profile || manifest.profile || path.basename(snapshotDir));
   const summary = await readJson(path.join(snapshotDir, "summary.json")).catch(() => []);
   const programsDir = path.join(snapshotDir, "programs");
+  await ensureDir(programsDir);
   let programFolders = [];
   try {
     const entries = await fs.readdir(snapshotDir, { withFileTypes: true });
@@ -257,7 +316,6 @@ async function main() {
     programFolders = [];
   }
 
-  const programs = [];
   const rawPayloads = [];
   for (const folder of programFolders) {
     const payloadPath = path.join(snapshotDir, folder, "branding.json");
@@ -270,25 +328,68 @@ async function main() {
     rawPayloads.push(payload);
   }
 
-  for (let index = 0; index < rawPayloads.length; index += 8) {
-    const chunk = rawPayloads.slice(index, index + 8);
-    const normalized = await Promise.all(
-      chunk.map((payload) =>
-        normalizeProgram(
-          payload,
-          snapshotDir,
-          snapshotId,
-          profile,
-          opts.assetAccess,
-          opts.uploadAssets
-        )
-      )
-    );
-    programs.push(...normalized);
-    console.log(`Prepared ${programs.length}/${rawPayloads.length} programs`);
+  const priorState = await readUploadState(snapshotDir);
+  const uploadedProgramIds = new Set(
+    Array.isArray(priorState.uploadedProgramIds)
+      ? priorState.uploadedProgramIds.map((value) => String(value))
+      : []
+  );
+  const startedAt = priorState.startedAt || new Date().toISOString();
+  await writeUploadState(snapshotDir, {
+    ...priorState,
+    status: "running",
+    profile,
+    snapshotId,
+    startedAt,
+    totalPrograms: rawPayloads.length,
+    uploadedProgramIds: [...uploadedProgramIds],
+    uploadedPrograms: uploadedProgramIds.size,
+  });
+
+  const programs = [];
+  let skippedUploads = 0;
+  for (let index = 0; index < rawPayloads.length; index += 1) {
+    const payload = rawPayloads[index];
+    const programId = String(payload.programId || "").trim();
+    const programKey = sanitizeName(programId);
+    if (!programKey) continue;
+    let program = await readNormalizedProgram(snapshotDir, programKey);
+    if (!program || program.snapshotId !== snapshotId) {
+      program = await normalizeProgram(
+        payload,
+        snapshotDir,
+        snapshotId,
+        profile,
+        opts.assetAccess,
+        opts.uploadAssets
+      );
+      await writeNormalizedProgram(snapshotDir, program);
+    }
+    programs.push(program);
+
+    if (uploadedProgramIds.has(programKey)) {
+      skippedUploads += 1;
+      console.log(`Skipped upload for ${programId}; already uploaded (${programs.length}/${rawPayloads.length})`);
+    } else {
+      await uploadProgramJson(program, snapshotId, profile, opts.jsonAccess);
+      uploadedProgramIds.add(programKey);
+      console.log(`Uploaded ${programId} (${programs.length}/${rawPayloads.length})`);
+    }
+
+    await writeUploadState(snapshotDir, {
+      status: "running",
+      profile,
+      snapshotId,
+      startedAt,
+      totalPrograms: rawPayloads.length,
+      uploadedProgramIds: [...uploadedProgramIds],
+      uploadedPrograms: uploadedProgramIds.size,
+      skippedUploads,
+      lastProgramId: programId,
+    });
   }
 
-  await fs.writeFile(path.join(snapshotDir, "programs.json"), JSON.stringify(programs, null, 2), "utf8");
+  await saveJson(path.join(snapshotDir, "programs.json"), programs);
 
   const uploadedManifest = {
     ...manifest,
@@ -304,6 +405,16 @@ async function main() {
     summary,
   };
 
+  await writeUploadState(snapshotDir, {
+    status: "finalizing",
+    profile,
+    snapshotId,
+    startedAt,
+    totalPrograms: rawPayloads.length,
+    uploadedProgramIds: [...uploadedProgramIds],
+    uploadedPrograms: uploadedProgramIds.size,
+    skippedUploads,
+  });
   await uploadJson(`${blobPrefix}/${snapshotId}/${profile}/manifest.json`, uploadedManifest, opts.jsonAccess);
   await uploadJson(`${blobPrefix}/${snapshotId}/${profile}/programs.json`, programs, opts.jsonAccess);
   await uploadJson(
@@ -317,11 +428,19 @@ async function main() {
     },
     opts.jsonAccess
   );
-
-  const localProgramsDirExists = await fs
-    .access(programsDir)
-    .then(() => true)
-    .catch(() => false);
+  const completedAt = new Date().toISOString();
+  await writeUploadState(snapshotDir, {
+    status: "completed",
+    profile,
+    snapshotId,
+    startedAt,
+    completedAt,
+    totalPrograms: rawPayloads.length,
+    uploadedProgramIds: [...uploadedProgramIds],
+    uploadedPrograms: uploadedProgramIds.size,
+    skippedUploads,
+    latestPointerPath: `${blobPrefix}/latest/${profile}.json`,
+  });
 
   console.log(
     JSON.stringify(
@@ -332,8 +451,10 @@ async function main() {
         jsonAccess: opts.jsonAccess,
         assetAccess: opts.assetAccess,
         uploadedAssets: opts.uploadAssets,
+        skippedUploads,
         blobPrefix: uploadedManifest.blobPrefix,
-        legacyProgramsDirExists: localProgramsDirExists,
+        latestPointerPath: `${blobPrefix}/latest/${profile}.json`,
+        message: "Branding upload complete. You can close this window.",
       },
       null,
       2

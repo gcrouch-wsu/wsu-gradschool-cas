@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import threading
+import hashlib
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -125,6 +126,10 @@ def log_path(profile: str) -> Path:
     return profile_root(profile) / "flask-command.log"
 
 
+def capture_state_path(profile: str) -> Path:
+    return profile_root(profile) / "capture-state.json"
+
+
 def read_json(path: Path) -> Any | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -222,6 +227,57 @@ def write_job(profile: str, **updates: Any) -> None:
     existing.update(updates)
     existing["updatedAt"] = utc_now()
     jobs[profile] = existing
+
+
+def write_profile_status(profile: str, **updates: Any) -> None:
+    path = status_path(profile)
+    existing = read_json(path)
+    if not isinstance(existing, dict):
+        existing = {"profile": profile}
+    existing.update(updates)
+    existing["profile"] = profile
+    existing["updatedAt"] = utc_now()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+
+
+def write_capture_state(profile: str, **updates: Any) -> None:
+    path = capture_state_path(profile)
+    existing = read_json(path)
+    if not isinstance(existing, dict):
+        existing = {}
+    existing.update(updates)
+    existing["profile"] = profile
+    existing["updatedAt"] = utc_now()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+
+
+def capture_source_key(profile: str, xlsx_path: Path, manifest_ids: list[str]) -> str:
+    if manifest_ids:
+        digest = hashlib.sha256("\n".join(manifest_ids).encode("utf-8")).hexdigest()[:16]
+        return f"manifest:{profile}:{len(manifest_ids)}:{digest}"
+    try:
+        stat = xlsx_path.stat()
+        return f"xlsx:{xlsx_path.resolve()}:{int(stat.st_mtime)}:{stat.st_size}"
+    except OSError:
+        return f"xlsx:{xlsx_path}"
+
+
+def resumable_snapshot_id(profile: str, source_key: str) -> str | None:
+    state = read_json(capture_state_path(profile))
+    if not isinstance(state, dict):
+        return None
+    if state.get("status") == "completed":
+        return None
+    if state.get("sourceKey") != source_key:
+        return None
+    snapshot_id = str(state.get("snapshotId") or "")
+    if not snapshot_id:
+        return None
+    if not snapshot_root(snapshot_id, profile).exists():
+        return None
+    return snapshot_id
 
 
 def latest_local_manifest(profile: str) -> dict[str, Any] | None:
@@ -325,11 +381,22 @@ def run_command(profile: str, label: str, command: list[str]) -> None:
                 message=result.stderr.strip() or result.stdout.strip() or "Command failed",
             )
             return
+        if label == "upload_latest":
+            message = "Branding upload complete. You can close this dashboard window."
+            write_profile_status(
+                profile,
+                mode="upload",
+                status="completed",
+                completedAt=utc_now(),
+                message=message,
+            )
+        else:
+            message = result.stdout.strip() or "Completed"
         write_job(
             profile,
             status="completed",
             completedAt=utc_now(),
-            message=result.stdout.strip() or "Completed",
+            message=message,
         )
     except Exception as exc:
         write_job(profile, status="error", completedAt=utc_now(), message=str(exc))
@@ -465,12 +532,14 @@ def start_thread(profile: str, label: str, command: list[str]) -> None:
 def capture_and_upload(profile: str, xlsx_path: Path, delay_ms: int) -> None:
     env = process_env()
     start_url = branding_start_url(env)
-    snapshot_id = datetime.now(timezone.utc).isoformat().replace(":", "-").replace(".", "-")
+    manifest_ids = manifest_program_ids(profile)
+    source_key = capture_source_key(profile, xlsx_path, manifest_ids)
+    resume_snapshot_id = resumable_snapshot_id(profile, source_key)
+    snapshot_id = resume_snapshot_id or datetime.now(timezone.utc).isoformat().replace(":", "-").replace(".", "-")
     output_dir = snapshot_root(snapshot_id, profile)
     status_file = status_path(profile)
     auth_file = profile_root(profile) / "user.json"
     trail_file = profile_root(profile) / "trail.json"
-    manifest_ids = manifest_program_ids(profile)
     id_file = write_manifest_id_file(profile, manifest_ids) if manifest_ids else None
     export_command = [
         "node",
@@ -511,11 +580,22 @@ def capture_and_upload(profile: str, xlsx_path: Path, delay_ms: int) -> None:
         status="running",
         startedAt=utc_now(),
         message=(
-            f"Capturing {len(manifest_ids)} Program IDs from Vercel manifest"
+            f"Resuming capture/upload for snapshot {snapshot_id}"
+            if resume_snapshot_id
+            else f"Capturing {len(manifest_ids)} Program IDs from Vercel manifest"
             if manifest_ids
             else f"Capturing {xlsx_path.name}"
         ),
         snapshotId=snapshot_id,
+    )
+    write_capture_state(
+        profile,
+        status="capturing",
+        snapshotId=snapshot_id,
+        sourceKey=source_key,
+        outputDir=str(output_dir),
+        totalPrograms=len(manifest_ids) if manifest_ids else count_program_ids(xlsx_path),
+        resumed=bool(resume_snapshot_id),
     )
     result = subprocess.run(
         export_command,
@@ -532,9 +612,18 @@ def capture_and_upload(profile: str, xlsx_path: Path, delay_ms: int) -> None:
             completedAt=utc_now(),
             message=result.stderr.strip() or result.stdout.strip() or "Capture failed",
         )
+        write_capture_state(profile, status="capture_error", snapshotId=snapshot_id)
         return
 
-    write_job(profile, status="running", message="Capture completed. Uploading to Vercel Blob.")
+    write_job(profile, status="running", message="Capture completed. Uploading to Vercel Blob. If interrupted, upload will resume from saved state.")
+    write_profile_status(
+        profile,
+        mode="upload",
+        status="running",
+        snapshotId=snapshot_id,
+        message="Capture completed. Uploading to Vercel Blob. If interrupted, upload will resume from saved state.",
+    )
+    write_capture_state(profile, status="uploading", snapshotId=snapshot_id)
     upload = subprocess.run(
         upload_command,
         cwd=REPO_ROOT,
@@ -550,14 +639,38 @@ def capture_and_upload(profile: str, xlsx_path: Path, delay_ms: int) -> None:
             completedAt=utc_now(),
             message=upload.stderr.strip() or upload.stdout.strip() or "Upload failed",
         )
+        write_profile_status(
+            profile,
+            mode="upload",
+            status="error",
+            snapshotId=snapshot_id,
+            completedAt=utc_now(),
+            message="Upload was interrupted or failed. Start capture again to resume from saved state.",
+        )
+        write_capture_state(profile, status="upload_error", snapshotId=snapshot_id)
         return
 
+    completion_message = "Branding upload complete. You can close this dashboard window."
     write_job(
         profile,
         status="completed",
         completedAt=utc_now(),
-        message=upload.stdout.strip() or "Captured and uploaded",
+        message=completion_message,
         snapshotId=snapshot_id,
+    )
+    write_profile_status(
+        profile,
+        mode="upload",
+        status="completed",
+        snapshotId=snapshot_id,
+        completedAt=utc_now(),
+        message=completion_message,
+    )
+    write_capture_state(
+        profile,
+        status="completed",
+        snapshotId=snapshot_id,
+        completedAt=utc_now(),
     )
 
 
@@ -636,6 +749,7 @@ def page_shell(body: str) -> str:
     .steps li {{ margin: 5px 0; }}
     pre {{ white-space: pre-wrap; overflow-wrap: anywhere; background: #211b15; color: #fff3df; padding: 14px; border-radius: 16px; font-size: 12px; max-height: 260px; overflow: auto; }}
     .warn {{ border-left: 5px solid var(--accent); padding-left: 12px; color: var(--muted); font: 14px/1.5 Verdana, sans-serif; }}
+    .success {{ border-left: 5px solid var(--accent-2); background: #eef7f2; padding: 12px; color: var(--ink); font: 700 14px/1.5 Verdana, sans-serif; }}
   </style>
   <script>
     function copyText(id, button) {{
@@ -682,6 +796,7 @@ def page_shell(body: str) -> str:
 
 def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) -> str:
     status = read_json(status_path(profile)) or {"status": "idle"}
+    capture_state = read_json(capture_state_path(profile)) or {}
     manifest = latest_local_manifest(profile)
     job = jobs.get(profile, {})
     log_text = read_text(log_path(profile))
@@ -726,6 +841,15 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
         if can_capture
         else "Capture unlocks when the Blob token, Program IDs, and guided-login Branding route are ready."
     )
+    resumable_note = ""
+    if isinstance(capture_state, dict) and capture_state.get("status") not in {None, "completed"}:
+        resumable_note = (
+            f"Saved state found for snapshot {escape(str(capture_state.get('snapshotId', '')))}. "
+            "Starting capture again will resume that snapshot and skip completed Program IDs."
+        )
+    completion_note = ""
+    if status.get("mode") == "upload" and status.get("status") == "completed":
+        completion_note = "Branding upload complete. You can close this dashboard window."
     return f"""
     <section class="card">
       <h2>{escape(config["label"])} branding capture</h2>
@@ -739,6 +863,7 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
         <span><strong>Guided login:</strong> {escape(str(route_status["message"]))}</span>
         <span>Latest local: {manifest_line}</span>
       </div>
+      {f'<p class="success">{completion_note}</p>' if completion_note else ''}
       <div class="step-card">
         <h3>1. Program IDs</h3>
         <p class="warn">{program_source_note}</p>
@@ -766,7 +891,8 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
       </div>
       <div class="step-card">
         <h3>3. Capture and upload</h3>
-        <p class="warn">{capture_ready_note} Capture opens Edge, visits each Program ID, writes the branding snapshot, and uploads it automatically.</p>
+        <p class="warn">{capture_ready_note} Capture opens Edge, visits each Program ID, writes the branding snapshot, and uploads it automatically. If it is interrupted, press this same button again to resume from saved state. When the dashboard says "Branding upload complete," you can close this dashboard window.</p>
+        {f'<p class="warn">{resumable_note}</p>' if resumable_note else ''}
         <form method="post" action="{url_for('capture', profile=profile)}">
           <input type="hidden" name="xlsx" value="{escape(str(xlsx))}">
           <label for="{profile}-delay">Delay per Program ID, ms</label>
@@ -789,7 +915,7 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
         <h3>Current Status</h3>
         <button class="copy-button" type="button" onclick="copyText('{status_id}', this)">Copy</button>
       </div>
-      <pre id="{status_id}">{escape(json.dumps({"collector": status, "job": job, "progress": progress, "brandingRoute": route_status}, indent=2))}</pre>
+      <pre id="{status_id}">{escape(json.dumps({"collector": status, "job": job, "progress": progress, "brandingRoute": route_status, "captureState": capture_state}, indent=2))}</pre>
       <div class="copy-row">
         <h3>Command Log</h3>
         <button class="copy-button" type="button" onclick="copyText('{log_id}', this)">Copy</button>
