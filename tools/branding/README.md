@@ -29,8 +29,9 @@ When the browser opens:
 1. log in fully
 2. finish MFA if required
 3. click through the portal exactly as you normally do
-4. open two or three branding pages that work correctly
-5. return to the terminal and press Enter once
+4. choose the live cycle, click `Details` for a program, then click `Branding`
+5. open two or three working Branding pages if possible
+6. return to the terminal and press Enter once, or close Edge while a Branding page is visible
 
 The script saves:
 
@@ -55,8 +56,9 @@ When the browser opens:
 
 1. log in if needed
 2. click through the portal exactly as you normally do
-3. open two or three branding pages that work correctly
-4. return to the terminal and press Enter
+3. choose the live cycle, click `Details` for a program, then click `Branding`
+4. open two or three working Branding pages if possible
+5. return to the terminal and press Enter, or close Edge while a Branding page is visible
 
 This saves:
 
@@ -99,7 +101,7 @@ Slower run with an extra pause after each page loads:
 npm run branding:export -- --xlsx GradCAS.xlsx --xlsx EngCAS.xlsx --delay-ms 4000
 ```
 
-By default, the scraper reads the `Program Attributes` sheet and extracts the `Program ID` column that matches branding URLs such as:
+By default, the scraper reads the `Program Attributes` sheet and extracts the `Program ID` column. Guided login records the live-cycle Program ID URL pattern and export swaps each ID into that recorded route. If no live-cycle pattern has been recorded, it falls back to the older direct branding URL shape:
 
 ```text
 https://configuration.prelaunch.cas.myliaison.com/configuration/assets/index.html#!/programBranding/547960

@@ -40,10 +40,11 @@ Use the profile switcher to choose either GradCAS or EngineeringCAS. Run one pro
 2. Confirm the saved file path appears as the current Excel report.
 3. Click `Open guided login`.
 4. In the browser that opens, log into WebAdMIT.
-5. Navigate to `CAS Configuration Portal`, then the correct CAS and cycle, then any program branding page.
-6. Open 2 or 3 working program branding pages.
-7. Close the browser window. This saves your login and navigation trail.
-8. Click `Capture and upload`.
+5. Navigate to `CAS Configuration Portal`, then the correct CAS and live cycle.
+6. Click `Details` for a program, then click `Branding`, and wait until the Branding page is visible.
+7. Repeat that Details -> Branding path for 2 or 3 programs if possible.
+8. Close the browser window while it is still on a Branding page. This saves your login, live-cycle route, and Program ID URL pattern.
+9. Click `Capture and upload`.
 
 Only use `Upload latest completed snapshot` if capture finished locally but the automatic Blob upload did not complete.
 

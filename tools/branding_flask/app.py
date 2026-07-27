@@ -682,7 +682,7 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
       </div>
       <div class="step-card">
         <h3>2. Open guided login</h3>
-        <p class="warn">Edge will open. Log into WebAdMIT, go to CAS Configuration Portal, choose {escape(config["label"])} and the correct cycle, open Branding for 2 or 3 programs, then close the Edge window. Closing the window saves the login and trail.</p>
+        <p class="warn">Edge will open. Log into WebAdMIT, go to CAS Configuration Portal, choose {escape(config["label"])} and the live cycle, click Details for a program, then click Branding. Wait until the Branding page is visible, repeat for 2 or 3 programs if possible, and close Edge while still on a Branding page. Closing the window saves the login, cycle route, and Program ID URL pattern.</p>
         <form method="post" action="{url_for('guide', profile=profile)}">
           <div class="actions">
             <button type="submit" class="secondary">Open guided login</button>
@@ -691,7 +691,7 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
       </div>
       <div class="step-card">
         <h3>3. Capture and upload</h3>
-        <p class="warn">This opens Edge and visits every Program ID from the Vercel manifest when loaded. If no manifest is loaded, it falls back to the selected Excel report. It uploads automatically when capture finishes.</p>
+        <p class="warn">This opens Edge and visits every Program ID from the Vercel manifest when loaded. If no manifest is loaded, it falls back to the selected Excel report. Capture uses the live-cycle Branding route saved in guided login and uploads automatically when it finishes.</p>
         <form method="post" action="{url_for('capture', profile=profile)}">
           <input type="hidden" name="xlsx" value="{escape(str(xlsx))}">
           <label for="{profile}-delay">Delay per Program ID, ms</label>

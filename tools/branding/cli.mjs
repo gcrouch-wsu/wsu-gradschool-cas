@@ -17,6 +17,7 @@ const defaultBaseUrl =
   "https://configuration.prelaunch.cas.myliaison.com/configuration/assets/index.html#!/programBranding";
 const defaultLoginUrl = "https://prelaunch.webadmit.org/";
 const defaultChannel = "msedge";
+const programIdPlaceholder = "__PROGRAM_ID__";
 
 function loadEnvFile(filePath) {
   return fs
@@ -284,7 +285,18 @@ async function updateStatus(settings, patch) {
   let merged = next;
   try {
     const prior = JSON.parse(await fs.readFile(settings.statusFile, "utf8"));
-    merged = { ...prior, ...next };
+    const resetExportCounters =
+      patch.mode && patch.mode !== "export"
+        ? {
+            snapshotId: null,
+            totalPrograms: null,
+            completedPrograms: null,
+            okPrograms: null,
+            emptyShellPrograms: null,
+            errorPrograms: null,
+          }
+        : {};
+    merged = { ...prior, ...resetExportCounters, ...next };
   } catch {
     merged = next;
   }
@@ -324,12 +336,25 @@ async function collectTrailWhileBrowsing(page, promptText, settings) {
     });
     console.log(`Captured: ${url}`);
   };
+  const captureCurrentUrl = () => {
+    try {
+      if (!page.isClosed()) capture(page.url());
+    } catch {
+      // The user may close the browser while the interval is polling.
+    }
+  };
   page.on("framenavigated", (frame) => {
     if (frame === page.mainFrame()) capture(frame.url());
   });
   page.on("load", () => capture(page.url()));
-  capture(page.url());
-  await awaitUserCompletion(promptText, page, settings);
+  const interval = setInterval(captureCurrentUrl, 500);
+  captureCurrentUrl();
+  try {
+    await awaitUserCompletion(promptText, page, settings);
+    captureCurrentUrl();
+  } finally {
+    clearInterval(interval);
+  }
   return visited;
 }
 
@@ -350,6 +375,100 @@ function isRelevantTrailUrl(url) {
   );
 }
 
+function isBrandingTrailUrl(url) {
+  const lower = String(url || "").toLowerCase();
+  return isRelevantTrailUrl(url) && lower.includes("branding");
+}
+
+function urlStringsFromEntries(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => (entry && typeof entry.url === "string" ? entry.url : ""))
+    .filter(Boolean);
+}
+
+function programIdCandidates(url) {
+  return Array.from(String(url || "").matchAll(/\d{5,}/g)).map((match) => ({
+    value: match[0],
+    index: match.index ?? 0,
+  }));
+}
+
+function scoreProgramIdCandidate(candidate, url, urls) {
+  const lower = url.toLowerCase();
+  const before = lower.slice(Math.max(0, candidate.index - 80), candidate.index);
+  const after = lower.slice(
+    candidate.index + candidate.value.length,
+    candidate.index + candidate.value.length + 80
+  );
+  let score = 0;
+  if (before.includes("programbranding")) score += 30;
+  if (before.includes("program") || after.includes("program")) score += 15;
+  if (before.includes("branding") || after.includes("branding")) score += 10;
+  if (urls.length > 1 && urls.some((other) => other !== url && !other.includes(candidate.value))) {
+    score += 20;
+  }
+  score += Math.min(candidate.index / 1000, 10);
+  return score;
+}
+
+function buildProgramUrlTemplate(urls) {
+  const usable = urls.filter((url) => isRelevantTrailUrl(url) && programIdCandidates(url).length);
+  if (usable.length === 0) return "";
+  const source = usable[usable.length - 1];
+  const candidates = programIdCandidates(source)
+    .map((candidate) => ({
+      ...candidate,
+      score: scoreProgramIdCandidate(candidate, source, usable),
+    }))
+    .sort((left, right) => right.score - left.score || right.index - left.index);
+  const selected = candidates[0];
+  if (!selected) return "";
+  return [
+    source.slice(0, selected.index),
+    programIdPlaceholder,
+    source.slice(selected.index + selected.value.length),
+  ].join("");
+}
+
+function buildTrail(settings, visited) {
+  const entries = visited.slice(-80);
+  const urls = urlStringsFromEntries(entries);
+  const brandingUrls = urls.filter(isBrandingTrailUrl);
+  const brandingUrlTemplate = buildProgramUrlTemplate(brandingUrls);
+  const programUrlTemplate = buildProgramUrlTemplate(urls);
+  const trail = {
+    loginUrl: settings.loginUrl,
+    baseUrl: settings.baseUrl,
+    recordedAt: new Date().toISOString(),
+    entries,
+  };
+  if (brandingUrlTemplate) trail.brandingUrlTemplate = brandingUrlTemplate;
+  if (programUrlTemplate) trail.programUrlTemplate = programUrlTemplate;
+  const exampleUrls = brandingUrls.length ? brandingUrls : urls.filter((url) => programIdCandidates(url).length);
+  if (exampleUrls.length) trail.exampleProgramUrl = exampleUrls[exampleUrls.length - 1];
+  return trail;
+}
+
+function resolveTemplateUrl(template, programId) {
+  if (!template || !template.includes(programIdPlaceholder)) return "";
+  return template.replace(programIdPlaceholder, encodeURIComponent(String(programId).trim()));
+}
+
+function resolveProgramCaptureUrl(settings, trail, programId) {
+  const urls = urlStringsFromEntries(trail?.entries);
+  const templates = [
+    trail?.brandingUrlTemplate,
+    trail?.programUrlTemplate,
+    buildProgramUrlTemplate(urls.filter(isBrandingTrailUrl)),
+    buildProgramUrlTemplate(urls),
+  ];
+  for (const template of templates) {
+    const resolved = resolveTemplateUrl(template, programId);
+    if (resolved) return resolved;
+  }
+  return `${settings.baseUrl.replace(/\/$/, "")}/${encodeURIComponent(programId)}`;
+}
+
 async function recordTrail(settings) {
   await fs.access(settings.authFile).catch(() => {
     throw new Error(
@@ -362,18 +481,19 @@ async function recordTrail(settings) {
     await page.goto(settings.loginUrl, { waitUntil: "domcontentloaded" });
     console.log("Use the browser normally now.");
     console.log("After login, click through the portal exactly as you normally do.");
-    console.log("Open two or three working branding pages, then return here.");
+    console.log("Choose the live cycle, click Details, then click Branding.");
+    console.log("Open two or three working Branding pages if possible, then return here.");
     const visited = await collectTrailWhileBrowsing(page, "Press Enter after you have clicked through the portal and loaded a few good branding pages...", settings);
-    const trail = {
-      loginUrl: settings.loginUrl,
-      baseUrl: settings.baseUrl,
-      recordedAt: new Date().toISOString(),
-      entries: visited.slice(-20),
-    };
+    const trail = buildTrail(settings, visited);
     await context.storageState({ path: settings.authFile });
     await saveJson(settings.trailFile, trail);
     console.log(`Saved updated auth state to ${settings.authFile}`);
     console.log(`Saved navigation trail to ${settings.trailFile}`);
+    if (trail.brandingUrlTemplate || trail.programUrlTemplate) {
+      console.log(`Saved program URL template: ${trail.brandingUrlTemplate || trail.programUrlTemplate}`);
+    } else {
+      console.log("No program URL template was captured. Open a live-cycle Details/Branding page before closing Edge.");
+    }
     await updateStatus(settings, { mode: "record", status: "completed", completedAt: new Date().toISOString(), message: "Trail saved." });
   } finally {
     await browser.close().catch(() => {});
@@ -389,18 +509,19 @@ async function guideLogin(settings) {
     await page.goto(settings.loginUrl, { waitUntil: "domcontentloaded" });
     console.log(`Opened login page ${settings.loginUrl}`);
     console.log("Sign in, complete MFA, then click through the portal exactly as you normally do.");
-    console.log("Go to CAS Configuration Portal, choose the correct organization/cycle, and open two or three working branding pages.");
+    console.log("Go to CAS Configuration Portal, choose the live cycle, click Details, then click Branding.");
+    console.log("Open two or three working Branding pages if possible, and close Edge while a Branding page is visible.");
     const visited = await collectTrailWhileBrowsing(page, "Press Enter after login is complete and you have opened a few good branding pages...", settings);
-    const trail = {
-      loginUrl: settings.loginUrl,
-      baseUrl: settings.baseUrl,
-      recordedAt: new Date().toISOString(),
-      entries: visited.slice(-20),
-    };
+    const trail = buildTrail(settings, visited);
     await context.storageState({ path: settings.authFile });
     await saveJson(settings.trailFile, trail);
     console.log(`Saved auth state to ${settings.authFile}`);
     console.log(`Saved navigation trail to ${settings.trailFile}`);
+    if (trail.brandingUrlTemplate || trail.programUrlTemplate) {
+      console.log(`Saved program URL template: ${trail.brandingUrlTemplate || trail.programUrlTemplate}`);
+    } else {
+      console.log("No program URL template was captured. Open a live-cycle Details/Branding page before closing Edge.");
+    }
     await updateStatus(settings, { mode: "guide", status: "completed", completedAt: new Date().toISOString(), message: "Auth state and trail saved." });
   } finally {
     await browser.close().catch(() => {});
@@ -432,6 +553,28 @@ async function resetToOrganization(page, settings) {
   await page.waitForTimeout(settings.delayMs);
 }
 
+async function openBrandingTabIfNeeded(page, settings) {
+  if ((await page.locator("section.branding:visible").count().catch(() => 0)) > 0) return;
+  const candidates = [
+    page.getByRole("link", { name: /^branding$/i }).first(),
+    page.getByRole("button", { name: /^branding$/i }).first(),
+    page.locator("a, button, [role='tab']", { hasText: /^branding$/i }).first(),
+    page.locator("a, button, [role='tab']", { hasText: /branding/i }).first(),
+  ];
+  for (const candidate of candidates) {
+    if ((await candidate.count().catch(() => 0)) === 0) continue;
+    const clicked = await candidate.click({ timeout: 5000 }).then(
+      () => true,
+      () => false
+    );
+    if (!clicked) continue;
+    console.log("Clicked Branding tab.");
+    await page.waitForLoadState("networkidle").catch(() => {});
+    await page.waitForTimeout(settings.delayMs);
+    return;
+  }
+}
+
 async function followRecordedTrail(page, settings) {
   try {
     const trail = await loadJson(settings.trailFile);
@@ -439,7 +582,7 @@ async function followRecordedTrail(page, settings) {
     const usable = entries
       .map((entry) => (entry && typeof entry.url === "string" ? entry.url : ""))
       .filter(Boolean)
-      .filter((url) => !url.includes("/programBranding/"))
+      .filter((url) => !isBrandingTrailUrl(url))
       .slice(-5);
     for (const url of usable) {
       console.log(`Replaying trail: ${url}`);
@@ -447,8 +590,10 @@ async function followRecordedTrail(page, settings) {
       await page.waitForLoadState("networkidle").catch(() => {});
       await page.waitForTimeout(settings.delayMs);
     }
+    return trail;
   } catch {
     // Trail is optional.
+    return null;
   }
 }
 
@@ -672,18 +817,24 @@ async function exportBranding(settings, opts) {
     completedPrograms: 0,
   });
   try {
-    await followRecordedTrail(page, settings);
+    const trail = await followRecordedTrail(page, settings);
+    if (trail?.brandingUrlTemplate || trail?.programUrlTemplate) {
+      console.log(`Using recorded program URL template: ${trail.brandingUrlTemplate || trail.programUrlTemplate}`);
+    } else {
+      console.log("No recorded program URL template found; using BRANDING_BASE_URL fallback.");
+    }
     for (let index = 0; index < ids.length; index += 1) {
       const id = ids[index];
       if (settings.resetEach) {
         await resetToOrganization(page, settings);
       }
-      const url = `${settings.baseUrl.replace(/\/$/, "")}/${encodeURIComponent(id)}`;
+      const url = resolveProgramCaptureUrl(settings, trail, id);
       const targetDir = path.join(settings.outputDir, sanitizeName(id));
       await ensureDir(targetDir);
       console.log(`Visiting ${url}`);
       await page.goto(url, { waitUntil: "domcontentloaded" });
       await page.waitForLoadState("networkidle").catch(() => {});
+      await openBrandingTabIfNeeded(page, settings);
       await waitForBrandingReady(page, settings);
       await page.screenshot({
         path: path.join(targetDir, "page.png"),
