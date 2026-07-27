@@ -36,16 +36,16 @@ http://127.0.0.1:5050
 
 Use the profile switcher to choose either GradCAS or EngineeringCAS. Run one profile at a time.
 
-1. Select the Excel report and save it in the local app.
-2. Confirm the saved file path appears as the current Excel report.
-3. Enter the WebAdMIT/CAS start URL for the environment you want to capture and save it.
+1. Enter the WebAdMIT/CAS start URL for the environment you want to capture and save it.
+2. Confirm the Vercel publication manifest is loaded. If it is loaded, skip the Excel report buttons.
+3. If there is no Vercel manifest, choose and save an Excel report so the tool has Program IDs.
 4. Click `Open guided login`.
 5. In the browser that opens, log into WebAdMIT.
 6. Navigate to `CAS Configuration Portal`, then the correct CAS and live cycle.
 7. Click `Details` for a program, then click `Branding`, and wait until the Branding page is visible.
 8. Repeat that Details -> Branding path for 2 or 3 programs if possible.
 9. Close the browser window while it is still on a Branding page. This saves your login, live-cycle route, and Program ID URL pattern.
-10. Click `Capture and upload`.
+10. When the dashboard says the Branding route is ready, click `Start <profile> capture and upload`.
 
 Only use `Upload latest completed snapshot` if capture finished locally but the automatic Blob upload did not complete.
 

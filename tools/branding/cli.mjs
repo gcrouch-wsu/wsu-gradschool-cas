@@ -330,6 +330,8 @@ async function login(settings) {
 
 async function collectTrailWhileBrowsing(page, promptText, settings) {
   const visited = [];
+  const context = page.context();
+  const trackedPages = new Set();
   const capture = (url) => {
     if (!url || !isRelevantTrailUrl(url)) return;
     if (visited.some((entry) => entry.url === url)) return;
@@ -339,24 +341,38 @@ async function collectTrailWhileBrowsing(page, promptText, settings) {
     });
     console.log(`Captured: ${url}`);
   };
-  const captureCurrentUrl = () => {
+  const capturePageUrl = (trackedPage) => {
     try {
-      if (!page.isClosed()) capture(page.url());
+      if (!trackedPage.isClosed()) capture(trackedPage.url());
     } catch {
       // The user may close the browser while the interval is polling.
     }
   };
-  page.on("framenavigated", (frame) => {
-    if (frame === page.mainFrame()) capture(frame.url());
-  });
-  page.on("load", () => capture(page.url()));
-  const interval = setInterval(captureCurrentUrl, 500);
-  captureCurrentUrl();
+  const captureAllCurrentUrls = () => {
+    for (const trackedPage of context.pages()) {
+      trackPage(trackedPage);
+      capturePageUrl(trackedPage);
+    }
+  };
+  const trackPage = (nextPage) => {
+    if (trackedPages.has(nextPage)) return;
+    trackedPages.add(nextPage);
+    nextPage.on("framenavigated", (frame) => {
+      if (frame === nextPage.mainFrame()) capture(frame.url());
+    });
+    nextPage.on("load", () => capturePageUrl(nextPage));
+    nextPage.on("close", () => capturePageUrl(nextPage));
+    capturePageUrl(nextPage);
+  };
+  context.on("page", trackPage);
+  captureAllCurrentUrls();
+  const interval = setInterval(captureAllCurrentUrls, 500);
   try {
     await awaitUserCompletion(promptText, page, settings);
-    captureCurrentUrl();
+    captureAllCurrentUrls();
   } finally {
     clearInterval(interval);
+    context.off("page", trackPage);
   }
   return visited;
 }
@@ -378,7 +394,9 @@ function isRelevantTrailUrl(url) {
       hostname === "webadmit.org" ||
       hostname.endsWith(".webadmit.org") ||
       hostname === "myliaison.com" ||
-      hostname.endsWith(".myliaison.com")
+      hostname.endsWith(".myliaison.com") ||
+      hostname === "liaisoncas.com" ||
+      hostname.endsWith(".liaisoncas.com")
     );
   } catch {
     return false;

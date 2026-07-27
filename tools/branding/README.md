@@ -68,6 +68,7 @@ This saves:
 Later export runs will replay the recent non-branding URLs from that trail before opening each branding page.
 
 You usually do not need this if you already used `npm run branding:login`, because that command now performs the guided login + trail capture together.
+The recorder watches all tabs/windows opened by the portal. Close the browser while a Branding page is visible so the saved trail includes the Program ID URL pattern.
 
 ## Export branding
 

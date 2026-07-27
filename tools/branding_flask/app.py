@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from flask import Flask, redirect, request, url_for
 from werkzeug.utils import secure_filename
@@ -139,6 +140,16 @@ def read_text(path: Path, max_chars: int = 5000) -> str:
     return text[-max_chars:]
 
 
+def url_origin(value: str) -> str:
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return ""
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+
+
 def capture_manifest() -> dict[str, Any] | None:
     value = read_json(CAPTURE_MANIFEST_FILE)
     return value if isinstance(value, dict) else None
@@ -157,6 +168,45 @@ def manifest_program_ids(profile: str) -> list[str]:
     if not isinstance(ids, list):
         return []
     return [str(value).strip() for value in ids if str(value).strip()]
+
+
+def auth_file(profile: str) -> Path:
+    return profile_root(profile) / "user.json"
+
+
+def trail_file(profile: str) -> Path:
+    return profile_root(profile) / "trail.json"
+
+
+def capture_route_status(profile: str, env: dict[str, str]) -> dict[str, Any]:
+    trail = read_json(trail_file(profile))
+    has_auth = auth_file(profile).exists()
+    has_trail = isinstance(trail, dict)
+    has_template = bool(
+        trail.get("brandingUrlTemplate") or trail.get("programUrlTemplate")
+    ) if has_trail else False
+    start_origin = url_origin(branding_start_url(env))
+    trail_origin = url_origin(str(trail.get("loginUrl", ""))) if has_trail else ""
+    same_environment = not trail_origin or not start_origin or trail_origin == start_origin
+    ready = has_auth and has_template and same_environment
+    if ready:
+        message = "Ready. Guided login saved a Branding page route for this URL."
+    elif not has_auth:
+        message = "Not ready. Run guided login first."
+    elif not has_trail:
+        message = "Not ready. Run guided login so the app can save the Branding route."
+    elif not same_environment:
+        message = "Not ready. The saved guide route belongs to a different start URL."
+    else:
+        message = "Not ready. Guided login saved your login, but not the Branding page route."
+    return {
+        "ready": ready,
+        "message": message,
+        "hasAuth": has_auth,
+        "hasTrail": has_trail,
+        "hasTemplate": has_template,
+        "sameEnvironment": same_environment,
+    }
 
 
 def write_manifest_id_file(profile: str, program_ids: list[str]) -> Path:
@@ -571,6 +621,7 @@ def page_shell(body: str) -> str:
       text-decoration: none;
     }}
     button.secondary {{ background: var(--accent-2); }}
+    button:disabled {{ background: #9b938b; cursor: not-allowed; }}
     .copy-row {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; }}
     .copy-row h3 {{ margin: 0; }}
     .copy-button {{ padding: 8px 11px; background: #6f6256; font-size: 12px; }}
@@ -641,6 +692,8 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
     manifest_ids = manifest_program_ids(profile)
     program_count = len(manifest_ids) if manifest_ids else count_program_ids(Path(xlsx))
     progress = progress_line(status, program_count)
+    route_status = capture_route_status(profile, env)
+    can_capture = token_present and route_status["ready"] and bool(program_count)
     status_id = f"{profile}-status"
     log_id = f"{profile}-log"
     file_output_id = f"{profile}-file-output"
@@ -660,32 +713,50 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
             f"empty {escape(str(manifest.get('emptyShellPrograms', 0)))}; "
             f"errors {escape(str(manifest.get('errorPrograms', 0)))}"
         )
+    program_source_note = (
+        f"Program IDs are loaded from the Vercel manifest for {escape(config['label'])}. "
+        "Skip the Excel buttons unless you want to use a report as a fallback."
+        if capture_row
+        else "No Vercel manifest is loaded for this profile. Choose and save an Excel report so capture has Program IDs."
+    )
+    excel_details_attr = "" if capture_row else " open"
+    capture_disabled = "" if can_capture else " disabled"
+    capture_ready_note = (
+        f"Ready to capture {program_count} Program IDs."
+        if can_capture
+        else "Capture unlocks when the Blob token, Program IDs, and guided-login Branding route are ready."
+    )
     return f"""
     <section class="card">
       <h2>{escape(config["label"])} branding capture</h2>
       <div class="meta">
         <span class="pill">Collector: {escape(str(status.get("status", "idle")))}</span>
         <span class="pill">Blob token: {"present" if token_present else "missing"}</span>
+        <span class="pill">Branding route: {"ready" if route_status["ready"] else "not ready"}</span>
         <span class="pill">Progress: {escape(progress)}</span>
         <span><strong>Current Excel report:</strong> {escape(str(xlsx))}</span>
         <span><strong>Capture source:</strong> {manifest_source_line}</span>
+        <span><strong>Guided login:</strong> {escape(str(route_status["message"]))}</span>
         <span>Latest local: {manifest_line}</span>
       </div>
       <div class="step-card">
-        <h3>1. Select the Excel report</h3>
-        <p class="warn">Choose the configuration portal export for this CAS. After saving it here, the app shows the stored file path above and uses it for capture.</p>
-        <form method="post" action="{url_for('upload_export', profile=profile)}" enctype="multipart/form-data">
-          <label for="{file_input_id}">Excel export</label>
-          <label class="file-picker" for="{file_input_id}">Choose Excel report</label>
-          <input class="sr-only" id="{file_input_id}" name="xlsx_file" type="file" accept=".xlsx,.xls" onchange="showChosenFile('{file_input_id}', '{file_output_id}')">
-          <div id="{file_output_id}" class="selected-file" data-current="Current saved report: {escape(str(xlsx))}">Current saved report: {escape(str(xlsx))}</div>
-          <div class="actions">
-            <button type="submit" class="secondary">Save selected Excel report</button>
-          </div>
-        </form>
+        <h3>1. Program IDs</h3>
+        <p class="warn">{program_source_note}</p>
+        <details{excel_details_attr}>
+          <summary><strong>Excel fallback</strong></summary>
+          <form method="post" action="{url_for('upload_export', profile=profile)}" enctype="multipart/form-data">
+            <label for="{file_input_id}">Excel export</label>
+            <label class="file-picker" for="{file_input_id}">Choose Excel report</label>
+            <input class="sr-only" id="{file_input_id}" name="xlsx_file" type="file" accept=".xlsx,.xls" onchange="showChosenFile('{file_input_id}', '{file_output_id}')">
+            <div id="{file_output_id}" class="selected-file" data-current="Current saved report: {escape(str(xlsx))}">Current saved report: {escape(str(xlsx))}</div>
+            <div class="actions">
+              <button type="submit" class="secondary">Save selected Excel report</button>
+            </div>
+          </form>
+        </details>
       </div>
       <div class="step-card">
-        <h3>2. Open guided login</h3>
+        <h3>2. Save the Branding route</h3>
         <p class="warn">Edge will open. Log into WebAdMIT, go to CAS Configuration Portal, choose {escape(config["label"])} and the live cycle, click Details for a program, then click Branding. Wait until the Branding page is visible, repeat for 2 or 3 programs if possible, and close Edge while still on a Branding page. Closing the window saves the login, cycle route, and Program ID URL pattern.</p>
         <form method="post" action="{url_for('guide', profile=profile)}">
           <div class="actions">
@@ -695,13 +766,13 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
       </div>
       <div class="step-card">
         <h3>3. Capture and upload</h3>
-        <p class="warn">This opens Edge and visits every Program ID from the Vercel manifest when loaded. If no manifest is loaded, it falls back to the selected Excel report. Capture uses the live-cycle Branding route saved in guided login and uploads automatically when it finishes.</p>
+        <p class="warn">{capture_ready_note} Capture opens Edge, visits each Program ID, writes the branding snapshot, and uploads it automatically.</p>
         <form method="post" action="{url_for('capture', profile=profile)}">
           <input type="hidden" name="xlsx" value="{escape(str(xlsx))}">
           <label for="{profile}-delay">Delay per Program ID, ms</label>
           <input id="{profile}-delay" name="delay_ms" value="4500">
           <div class="actions">
-            <button type="submit">Capture and upload</button>
+            <button type="submit"{capture_disabled}>Start {escape(config["label"])} capture and upload</button>
           </div>
         </form>
       </div>
@@ -718,7 +789,7 @@ def render_profile(profile: str, config: dict[str, Any], env: dict[str, str]) ->
         <h3>Current Status</h3>
         <button class="copy-button" type="button" onclick="copyText('{status_id}', this)">Copy</button>
       </div>
-      <pre id="{status_id}">{escape(json.dumps({"collector": status, "job": job, "progress": progress}, indent=2))}</pre>
+      <pre id="{status_id}">{escape(json.dumps({"collector": status, "job": job, "progress": progress, "brandingRoute": route_status}, indent=2))}</pre>
       <div class="copy-row">
         <h3>Command Log</h3>
         <button class="copy-button" type="button" onclick="copyText('{log_id}', this)">Copy</button>
@@ -891,9 +962,31 @@ def upload_export(profile: str):
 def capture(profile: str):
     if profile not in PROFILES:
         return "Unknown profile", 404
+    env = process_env()
+    route_status = capture_route_status(profile, env)
+    manifest_ids = manifest_program_ids(profile)
+    if not env.get("BLOB_READ_WRITE_TOKEN"):
+        write_job(profile, status="error", message="Blob token is missing.", completedAt=utc_now())
+        return profile_redirect(profile)
+    if not route_status["ready"]:
+        write_job(
+            profile,
+            status="error",
+            message=f"{route_status['message']} Open guided login, reach Branding, then close Edge while Branding is visible.",
+            completedAt=utc_now(),
+        )
+        return profile_redirect(profile)
     xlsx = Path(request.form.get("xlsx") or str(PROFILES[profile]["xlsx"])).expanduser()
     if not xlsx.is_absolute():
         xlsx = REPO_ROOT / xlsx
+    if not manifest_ids and not xlsx.exists():
+        write_job(
+            profile,
+            status="error",
+            message="No Program IDs available. Load the Vercel manifest or choose an Excel report.",
+            completedAt=utc_now(),
+        )
+        return profile_redirect(profile)
     try:
         delay_ms = int(request.form.get("delay_ms") or "4500")
         if delay_ms < 0 or delay_ms > 120_000:
