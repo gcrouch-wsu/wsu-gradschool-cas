@@ -1,4 +1,4 @@
-import { get, list, put } from "@vercel/blob";
+import { del, get, list, put } from "@vercel/blob";
 import type {
   CasPublicationData,
   PublicPublicationPayload,
@@ -117,6 +117,16 @@ export type PublicationRow = {
   program_display_name_strip_suffixes: string[];
   cycle_display_override: string;
   data: CasPublicationData;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PublicationSummary = {
+  slug: string;
+  title: string;
+  sourceFileName: string;
+  groupCount: number;
+  offeringCount: number;
   created_at: string;
   updated_at: string;
 };
@@ -397,7 +407,11 @@ function stripLocalBrandingData(data: CasPublicationData): CasPublicationData {
     brandingCoverage: undefined,
     groups: data.groups.map((group) => ({
       ...group,
-      offerings: group.offerings.map(({ branding: _branding, ...offering }) => offering),
+      offerings: group.offerings.map((offering) => {
+        const next = { ...offering };
+        delete next.branding;
+        return next;
+      }),
     })),
   };
 }
@@ -444,9 +458,7 @@ export class PublicationStorageError extends Error {
   }
 }
 
-export async function getPublicationBySlug(
-  slug: string
-): Promise<PublicationRow | null> {
+async function getStoredPublicationBlob(slug: string): Promise<StoredPublicationBlob | null> {
   if (!/^[a-z0-9]{8,32}$/.test(slug)) {
     return null;
   }
@@ -470,6 +482,23 @@ export async function getPublicationBySlug(
     if (parsed.version !== 1 || parsed.slug !== slug) {
       return null;
     }
+    return parsed;
+  } catch (e) {
+    if (e instanceof PublicationStorageError) throw e;
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/not found|404|NoSuchKey|does not exist/i.test(msg)) {
+      return null;
+    }
+    throw new PublicationStorageError(`Failed to load publication ${slug}`, { cause: e });
+  }
+}
+
+export async function getPublicationBySlug(
+  slug: string
+): Promise<PublicationRow | null> {
+  try {
+    const parsed = await getStoredPublicationBlob(slug);
+    if (!parsed) return null;
     const row = blobToRow(parsed);
     const dataWithBranding = await mergeLatestBrandingIntoPublicationData(
       row.data,
@@ -481,12 +510,6 @@ export async function getPublicationBySlug(
     };
   } catch (e) {
     if (e instanceof PublicationStorageError) throw e;
-    // Missing blob is often surfaced as an error from the SDK — treat as not found
-    // when the message looks like a 404; otherwise rethrow as storage failure.
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/not found|404|NoSuchKey|does not exist/i.test(msg)) {
-      return null;
-    }
     throw new PublicationStorageError(`Failed to load publication ${slug}`, { cause: e });
   }
 }
@@ -540,6 +563,50 @@ export async function getCurrentViewPublication(): Promise<PublicationRow | null
   return getPublicationBySlug(slug);
 }
 
+export async function listPublicationSummaries(): Promise<PublicationSummary[]> {
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!token) return [];
+
+  let rows;
+  try {
+    rows = await list({
+      token,
+      prefix: `${BLOB_PREFIX}/`,
+      limit: 1000,
+    });
+  } catch {
+    return [];
+  }
+
+  const slugs = rows.blobs
+    .map((blob) => blob.pathname.slice(`${BLOB_PREFIX}/`.length))
+    .filter((name) => /^[a-z0-9]{8,32}\.json$/.test(name))
+    .map((name) => name.replace(/\.json$/, ""));
+
+  const summaries = await Promise.all(
+    slugs.map(async (slug) => {
+      const body = await getStoredPublicationBlob(slug).catch(() => null);
+      if (!body) return null;
+      return {
+        slug: body.slug,
+        title: body.title,
+        sourceFileName: body.data.sourceFileName,
+        groupCount: body.data.groups.length,
+        offeringCount: body.data.groups.reduce(
+          (sum, group) => sum + group.offerings.length,
+          0
+        ),
+        created_at: body.created_at,
+        updated_at: body.updated_at,
+      } satisfies PublicationSummary;
+    })
+  );
+
+  return summaries
+    .filter((row): row is PublicationSummary => Boolean(row))
+    .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+}
+
 export async function createPublication(input: {
   slug: string;
   title: string;
@@ -590,6 +657,34 @@ export async function setCurrentViewPublication(slug: string): Promise<Publicati
   if (!existing) return null;
   await persistCurrentView(slug);
   return existing;
+}
+
+export type DeletePublicationResult =
+  | { status: "deleted"; slug: string; title: string }
+  | { status: "not_found" }
+  | { status: "current_view"; currentViewSlug: string };
+
+export async function deletePublication(slug: string): Promise<DeletePublicationResult> {
+  const existing = await getStoredPublicationBlob(slug);
+  if (!existing) return { status: "not_found" };
+
+  const currentViewSlug = await getCurrentViewSlug();
+  if (currentViewSlug === slug) {
+    return { status: "current_view", currentViewSlug };
+  }
+
+  const token = requireBlobToken();
+  await del(publicationPathname(slug), { token });
+  await del(captureManifestPathForSlug(slug), { token }).catch(() => {});
+
+  const currentViewBody = currentViewSlug ? await getStoredPublicationBlob(currentViewSlug) : null;
+  if (currentViewBody) {
+    await persistBrandingCaptureManifest(currentViewBody);
+  } else {
+    await del(CAPTURE_MANIFEST_PATHNAME, { token }).catch(() => {});
+  }
+
+  return { status: "deleted", slug: existing.slug, title: existing.title };
 }
 
 export async function updatePublication(

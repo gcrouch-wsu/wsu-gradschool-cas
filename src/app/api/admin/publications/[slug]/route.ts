@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
+  deletePublication,
   getCurrentViewSlug,
   getPublicationBySlug,
   updatePublication,
@@ -157,4 +158,43 @@ export async function PATCH(
     isCurrentView: currentViewSlug === updated.slug,
     currentViewSlug,
   });
+}
+
+export async function DELETE(
+  _request: Request,
+  ctx: { params: Promise<{ slug: string }> }
+) {
+  const deny = await unauthorizedIfNotAdmin();
+  if (deny) return deny;
+  if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+    return NextResponse.json(
+      { error: "BLOB_READ_WRITE_TOKEN is not set. Link a Blob store to this project." },
+      { status: 500 }
+    );
+  }
+
+  const { slug } = await ctx.params;
+  let result;
+  try {
+    result = await deletePublication(slug);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Delete failed";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
+  if (result.status === "not_found") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (result.status === "current_view") {
+    return NextResponse.json(
+      {
+        error:
+          "This cycle drives the live home page. Set another cycle as live before deleting this one.",
+        currentViewSlug: result.currentViewSlug,
+      },
+      { status: 409 }
+    );
+  }
+
+  return NextResponse.json({ ok: true, slug: result.slug, title: result.title });
 }

@@ -170,6 +170,7 @@ export default function AdminPublicationPage() {
   const [mergeFile, setMergeFile] = useState<File | null>(null);
   const [mergeBusy, setMergeBusy] = useState(false);
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [settingsImportBusy, setSettingsImportBusy] = useState(false);
   const [settingsImportMessage, setSettingsImportMessage] = useState<string | null>(null);
   const [branding, setBranding] = useState<BrandingAdminResponse | null>(null);
@@ -659,6 +660,46 @@ export default function AdminPublicationPage() {
     }
   }
 
+  async function deleteCycle() {
+    if (!saved) return;
+    const typed = window.prompt(
+      `Delete "${saved.title}" permanently?\n\nThis removes the cycle publication and its capture manifest from Blob storage. Type ${slug} to confirm.`
+    );
+    if (typed !== slug) return;
+
+    setDeleteBusy(true);
+    setError(null);
+    setSaveMessage(null);
+    try {
+      const res = await fetch(`/api/admin/publications/${slug}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.status === 401) {
+        router.push(`/admin/login?next=${encodeURIComponent(`/admin/${slug}`)}`);
+        return;
+      }
+      if (!res.ok) {
+        const raw = await res.text();
+        let message = raw.slice(0, 400) || "Could not delete cycle";
+        try {
+          const parsed = JSON.parse(raw) as { error?: string };
+          if (parsed.error) message = parsed.error;
+        } catch {
+          /* use raw response */
+        }
+        setError(message);
+        return;
+      }
+      router.push("/admin");
+      router.refresh();
+    } catch {
+      setError("Network error");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   function downloadAdminBookmark() {
     const payload = {
       version: 1,
@@ -1000,6 +1041,31 @@ export default function AdminPublicationPage() {
             {mergeMessage && (
               <p className="mt-3 text-sm text-emerald-800">{mergeMessage}</p>
             )}
+          </section>
+
+          <section className="rounded-xl border border-red-200 bg-red-50/70 p-5 shadow-sm">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-red-900">
+              Delete cycle
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-red-950">
+              Permanently remove this cycle publication from Blob storage. This also removes the
+              capture manifest for this cycle. The live home cycle cannot be deleted until another
+              cycle is set as live.
+            </p>
+            {saved.isCurrentView ? (
+              <p className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-900">
+                This cycle currently drives / and /view. Set another cycle as live before deleting
+                this one.
+              </p>
+            ) : null}
+            <button
+              type="button"
+              disabled={deleteBusy || saving || saved.isCurrentView}
+              onClick={() => void deleteCycle()}
+              className="mt-4 rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-semibold text-red-800 shadow-sm hover:bg-red-100 disabled:pointer-events-none disabled:opacity-50"
+            >
+              {deleteBusy ? "Deleting…" : "Delete this cycle"}
+            </button>
           </section>
 
           <section className="rounded-xl border border-wsu-gray/15 bg-white p-5 shadow-sm">
