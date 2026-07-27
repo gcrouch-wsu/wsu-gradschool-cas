@@ -47,52 +47,64 @@ async function deleteCycle(slug: string): Promise<string | null> {
 export function AdminCycleList({ currentSlug, publications }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<string[]>([]);
+  const [deleted, setDeleted] = useState<string[]>([]);
+  const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const visiblePublications = useMemo(
+    () => publications.filter((p) => !deleted.includes(p.slug)),
+    [deleted, publications]
+  );
   const deletableSlugs = useMemo(
-    () => publications.filter((p) => p.slug !== currentSlug).map((p) => p.slug),
-    [currentSlug, publications]
+    () => visiblePublications.filter((p) => p.slug !== currentSlug).map((p) => p.slug),
+    [currentSlug, visiblePublications]
   );
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const allDeletableSelected =
     deletableSlugs.length > 0 && deletableSlugs.every((slug) => selectedSet.has(slug));
+  const canDelete = selected.length > 0 && confirmText === "DELETE";
 
   function toggle(slug: string) {
     setSelected((prev) =>
       prev.includes(slug) ? prev.filter((value) => value !== slug) : [...prev, slug]
     );
+    setConfirmText("");
   }
 
   function toggleAll() {
     setSelected(allDeletableSelected ? [] : deletableSlugs);
+    setConfirmText("");
   }
 
   async function bulkDelete() {
     const targets = selected.filter((slug) => slug !== currentSlug);
-    if (targets.length === 0) return;
-    const typed = window.prompt(
-      `Delete ${targets.length} selected cycle${targets.length === 1 ? "" : "s"} permanently?\n\nType DELETE to confirm.`
-    );
-    if (typed !== "DELETE") return;
+    if (targets.length === 0 || confirmText !== "DELETE") return;
 
     setBusy(true);
     setError(null);
     setMessage(null);
     const failures: string[] = [];
+    const successes: string[] = [];
     for (const slug of targets) {
       const failure = await deleteCycle(slug);
       if (failure) failures.push(`${slug}: ${failure}`);
+      else successes.push(slug);
     }
     setBusy(false);
+
+    if (successes.length > 0) {
+      setDeleted((prev) => [...new Set([...prev, ...successes])]);
+      setSelected((prev) => prev.filter((slug) => !successes.includes(slug)));
+      setMessage(`Deleted ${successes.length} cycle${successes.length === 1 ? "" : "s"}.`);
+    }
+    setConfirmText("");
 
     if (failures.length > 0) {
       setError(failures.join(" "));
       return;
     }
-    setSelected([]);
-    setMessage(`Deleted ${targets.length} cycle${targets.length === 1 ? "" : "s"}.`);
     router.refresh();
   }
 
@@ -108,14 +120,24 @@ export function AdminCycleList({ currentSlug, publications }: Props) {
             set as live.
           </p>
         </div>
-        <button
-          type="button"
-          disabled={busy || selected.length === 0}
-          onClick={() => void bulkDelete()}
-          className="inline-flex min-w-28 items-center justify-center rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-semibold text-red-800 shadow-sm hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
-        >
-          {busy ? "Deleting..." : "DELETE"}
-        </button>
+        <div className="flex flex-col gap-2 md:items-end">
+          <input
+            type="text"
+            value={confirmText}
+            disabled={busy || selected.length === 0}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="Type DELETE"
+            className="w-full rounded-lg border border-wsu-gray/25 px-3 py-2 text-sm text-wsu-gray-dark shadow-inner placeholder:text-wsu-gray/50 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:opacity-50 md:w-36"
+          />
+          <button
+            type="button"
+            disabled={busy || !canDelete}
+            onClick={() => void bulkDelete()}
+            className="inline-flex min-w-28 items-center justify-center rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-semibold text-red-800 shadow-sm hover:bg-red-50 disabled:pointer-events-none disabled:opacity-50"
+          >
+            {busy ? "Deleting..." : "DELETE"}
+          </button>
+        </div>
       </div>
 
       {message ? <p className="mt-3 text-sm text-emerald-800">{message}</p> : null}
@@ -144,7 +166,7 @@ export function AdminCycleList({ currentSlug, publications }: Props) {
         </div>
 
         <div className="divide-y divide-wsu-gray/10">
-          {publications.map((publication) => {
+          {visiblePublications.map((publication) => {
             const isLive = currentSlug === publication.slug;
             const checked = selectedSet.has(publication.slug);
             return (

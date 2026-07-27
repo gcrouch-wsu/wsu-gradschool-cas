@@ -3,6 +3,8 @@ import { getCurrentViewPublication, listPublicationSummaries } from "@/lib/cas-s
 import { AdminSignOutButton } from "@/components/AdminSignOutButton";
 import { AdminCycleList } from "./AdminCycleList";
 
+export const dynamic = "force-dynamic";
+
 function formatPublicationDate(iso: string): string {
   try {
     const d = new Date(iso);
