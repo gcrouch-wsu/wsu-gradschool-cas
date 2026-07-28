@@ -1,5 +1,5 @@
 import { del, get } from "@vercel/blob";
-import type { PublicationRow } from "./cas-store";
+import type { PublicationRow, WorkbookUploadMode } from "./cas-store";
 import { mergePublicationFromUpload } from "./cas-store";
 import { getBlobAccessMode } from "./blob-access";
 
@@ -15,7 +15,8 @@ function requireBlobToken(): string {
 export async function mergePublicationFromStagedPathname(
   slug: string,
   pathname: string,
-  sourceLabel: string
+  sourceLabel: string,
+  mode: WorkbookUploadMode = "replace-source"
 ): Promise<PublicationRow> {
   const prefix = `cas-merge-staging/${slug}/`;
   if (!pathname.startsWith(prefix)) {
@@ -29,7 +30,7 @@ export async function mergePublicationFromStagedPathname(
   }
   const buf = Buffer.from(await new Response(res.stream as ReadableStream).arrayBuffer());
   try {
-    const updated = await mergePublicationFromUpload(slug, buf, sourceLabel);
+    const updated = await mergePublicationFromUpload(slug, buf, sourceLabel, mode);
     if (!updated) throw new Error("Publication not found.");
     return updated;
   } finally {

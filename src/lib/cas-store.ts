@@ -31,6 +31,7 @@ import {
   parseCasWorkbook,
   pickVisibleShared,
   publicationUiDefaults,
+  replacePublicationDataProfiles,
 } from "./parse-cas";
 
 const BLOB_PREFIX = "cas-publications";
@@ -144,6 +145,8 @@ type CurrentViewBlob = {
   slug: string;
   updated_at: string;
 };
+
+export type WorkbookUploadMode = "replace-source" | "merge";
 
 export function resolvePublicationPublicHeader(row: PublicationRow): PublicationPublicHeader {
   const logoRaw = row.public_header_logo_url.trim();
@@ -743,27 +746,17 @@ export async function updatePublication(
   const aOpts = new Set(existing.data.answerColumnOptions);
   const dOpts = new Set(existing.data.documentColumnOptions);
 
-  const uiFallback = publicationUiDefaults(existing.data);
   let visible_question_columns = existing.visible_question_columns;
-  if (patch.visibleQuestionColumns) {
+  if (patch.visibleQuestionColumns !== undefined) {
     visible_question_columns = validateSubset(patch.visibleQuestionColumns, qOpts);
-    if (visible_question_columns.length === 0) {
-      visible_question_columns = uiFallback.visible_question_columns;
-    }
   }
   let visible_answer_columns = existing.visible_answer_columns;
-  if (patch.visibleAnswerColumns) {
+  if (patch.visibleAnswerColumns !== undefined) {
     visible_answer_columns = validateSubset(patch.visibleAnswerColumns, aOpts);
-    if (visible_answer_columns.length === 0) {
-      visible_answer_columns = uiFallback.visible_answer_columns;
-    }
   }
   let visible_document_columns = existing.visible_document_columns;
-  if (patch.visibleDocumentColumns) {
+  if (patch.visibleDocumentColumns !== undefined) {
     visible_document_columns = validateSubset(patch.visibleDocumentColumns, dOpts);
-    if (visible_document_columns.length === 0) {
-      visible_document_columns = uiFallback.visible_document_columns;
-    }
   }
 
   let term_field_settings = existing.term_field_settings;
@@ -853,14 +846,17 @@ export async function updatePublication(
 export async function mergePublicationFromUpload(
   slug: string,
   buffer: Buffer,
-  fileName: string
+  fileName: string,
+  mode: WorkbookUploadMode = "replace-source"
 ): Promise<PublicationRow | null> {
   const existing = await getPublicationBySlug(slug);
   if (!existing) return null;
   const parsed = parseCasWorkbook(buffer, fileName);
-  const merged = ensurePublicationColumnMetadata(
-    mergePublicationData(existing.data, parsed)
-  );
+  const mergedRaw =
+    mode === "merge"
+      ? mergePublicationData(existing.data, parsed)
+      : replacePublicationDataProfiles(existing.data, parsed).data;
+  const merged = ensurePublicationColumnMetadata(mergedRaw);
   const ui = publicationUiDefaults(merged);
   const summaryOpts = new Set(merged.summaryColumnOptions);
   const summaryKept = existing.visible_columns.filter((k) => summaryOpts.has(k));

@@ -305,6 +305,7 @@ export default function PublicCasView({
   }, [initial.groups, searchActive, selectedDept, query]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedKey((prev) =>
       visiblePrograms.some((g) => g.groupKey === prev) ? prev : visiblePrograms[0]?.groupKey ?? ""
     );
@@ -317,6 +318,7 @@ export default function PublicCasView({
       visiblePrograms[0];
     if (!g) return;
     const dept = departmentGroupLabel(g);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedDept((d) => (d === dept ? d : dept));
   }, [searchActive, visiblePrograms, selectedKey]);
 
@@ -1188,7 +1190,7 @@ function TableFromRecords({
   stackedGroupByApplicationWindow?: boolean;
 }) {
   const keys = useMemo(() => {
-    if (columns && columns.length > 0) {
+    if (columns) {
       return filterKeysByVisibleData(rows, columns);
     }
     return unionRowKeysWithData(rows);
@@ -1203,7 +1205,7 @@ function TableFromRecords({
   if (keys.length === 0) {
     return (
       <p className="mt-2 text-sm text-wsu-gray">
-        {columns && columns.length > 0
+        {columns
           ? "None of the selected columns contain values for these rows."
           : "No non-empty columns in these rows."}
       </p>

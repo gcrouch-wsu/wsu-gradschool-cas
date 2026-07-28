@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { mergePublicationFromUpload } from "@/lib/cas-store";
+import { mergePublicationFromUpload, type WorkbookUploadMode } from "@/lib/cas-store";
 import { mergePublicationFromStagedPathname } from "@/lib/merge-staged-workbook";
 import { unauthorizedIfNotAdmin } from "@/lib/require-admin";
 
@@ -8,12 +8,20 @@ export const maxDuration = 120;
 
 const SLUG_RE = /^[a-z0-9]{8,32}$/;
 
+function parseMode(value: unknown): WorkbookUploadMode {
+  return value === "merge" ? "merge" : "replace-source";
+}
+
 /**
- * Merge a second CAS workbook into this publication.
+ * Update this publication from another CAS workbook.
  *
- * - Preferred: `Content-Type: application/json` with `{ pathname, sourceFileName? }` after a
- *   client-side Blob upload (bypasses Vercel’s ~4.5MB serverless body limit).
+ * - Preferred: `Content-Type: application/json` with `{ pathname, sourceFileName?, mode? }` after
+ *   a client-side Blob upload (bypasses Vercel’s ~4.5MB serverless body limit).
  * - Legacy: `multipart/form-data` with field `file` (small workbooks only).
+ *
+ * Default mode is `replace-source`: the incoming workbook's CAS profile (GradCAS or
+ * EngineeringCAS) replaces that same source in the publication while other sources, public display
+ * settings, and branding snapshots are preserved.
  */
 export async function POST(
   request: Request,
@@ -36,9 +44,13 @@ export async function POST(
   const ct = request.headers.get("content-type") ?? "";
 
   if (ct.includes("application/json")) {
-    let payload: { pathname?: string; sourceFileName?: string };
+    let payload: { pathname?: string; sourceFileName?: string; mode?: unknown };
     try {
-      payload = (await request.json()) as { pathname?: string; sourceFileName?: string };
+      payload = (await request.json()) as {
+        pathname?: string;
+        sourceFileName?: string;
+        mode?: unknown;
+      };
     } catch {
       return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
@@ -54,12 +66,14 @@ export async function POST(
       typeof payload.sourceFileName === "string" && payload.sourceFileName.trim()
         ? payload.sourceFileName.trim()
         : pathname.split("/").pop() || "merge.xlsx";
+    const mode = parseMode(payload.mode);
     try {
-      const updated = await mergePublicationFromStagedPathname(slug, pathname, sourceLabel);
+      const updated = await mergePublicationFromStagedPathname(slug, pathname, sourceLabel, mode);
       return NextResponse.json({
         slug: updated.slug,
         sourceFileName: updated.data.sourceFileName,
         groupCount: updated.data.groups.length,
+        mode,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Merge failed";
@@ -85,12 +99,13 @@ export async function POST(
   }
   const buf = Buffer.from(await file.arrayBuffer());
   try {
-    const updated = await mergePublicationFromUpload(slug, buf, file.name);
+    const updated = await mergePublicationFromUpload(slug, buf, file.name, "replace-source");
     if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json({
       slug: updated.slug,
       sourceFileName: updated.data.sourceFileName,
       groupCount: updated.data.groups.length,
+      mode: "replace-source",
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Merge failed";

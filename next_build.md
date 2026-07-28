@@ -13,7 +13,7 @@ Vercel decides what needs to be captured from the merged publication data and ca
 3. Save the publication (updates `/s/{slug}` only).
 4. Click **Set as live home page** when this publication should drive `/` and `/view`.
 5. Saving also writes capture manifests to `cas-branding-capture/{slug}.json` and `cas-branding-capture/current.json`.
-6. Admin shows branding status for GradCAS and EngineeringCAS: `current`, `stale`, `missing`, or `not applicable`, with separate **any capture** vs **OK branding** counts.
+6. Admin shows branding status for GradCAS and EngineeringCAS: `current`, `missing`, or `not applicable`, with separate **any capture** vs **OK branding** counts.
 7. Open the local Flask branding capture app at `http://127.0.0.1:5050`.
 8. Load the latest publication from Vercel, confirm slug/title, run guided login and capture.
 9. Refresh Vercel admin and the public page to confirm branding.
@@ -32,6 +32,6 @@ Vercel decides what needs to be captured from the merged publication data and ca
 
 ## Remaining notes
 
-- Settings-only saves can still mark branding **stale** (timestamp comparison); `statusDetail` explains this.
+- Settings-only saves no longer require branding recapture when all expected Program IDs already have captures; `statusDetail` explains that branding is matched by Program ID.
 - Branding-diff unit tests still optional if a test runner is added.
 - Optional: URL sync for public dept/program selection.

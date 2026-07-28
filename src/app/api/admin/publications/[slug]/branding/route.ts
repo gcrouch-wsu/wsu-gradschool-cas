@@ -98,9 +98,7 @@ export async function GET(
         ? "not_applicable"
         : capturedAny.length === 0 || hasMissingIds
           ? "missing"
-          : dataNewerThanSnapshot
-            ? "stale"
-            : "current";
+          : "current";
     return {
       profile,
       label: profile === "gradcas" ? "GradCAS" : "EngineeringCAS",
@@ -116,10 +114,10 @@ export async function GET(
       statusDetail:
         status === "missing"
           ? `${missing.length} expected Program ID${missing.length === 1 ? "" : "s"} missing from the latest branding snapshot.`
-          : status === "stale"
-            ? "All expected Program IDs have captures, but the latest branding snapshot predates the latest publication save."
+          : status === "current" && dataNewerThanSnapshot
+            ? "All expected Program IDs have captures. The workbook was saved after the latest branding snapshot, but branding is matched by Program ID; recapture only if branding content changed in CAS."
             : status === "current"
-              ? "All expected Program IDs have captures and the latest snapshot is newer than the publication save."
+              ? "All expected Program IDs have captures."
               : "This publication has no expected Program IDs for this profile.",
       latestSnapshotId: latest?.snapshotId ?? null,
       latestCompletedAt: latest?.completedAt ?? null,

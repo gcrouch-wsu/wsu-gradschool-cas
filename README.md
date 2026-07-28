@@ -74,6 +74,21 @@ On **`/admin/[slug]`**, summary columns, default program, and whether to show **
 
 ---
 
+## Updating one CAS workbook on an existing live cycle
+
+Use the existing publication admin page, not a new publication, when only one CAS source changed.
+
+1. Sign in at **`/admin/login`**.
+2. Open **`/admin/<slug>`** for the live cycle, for example **`/admin/r7msqnw6dwfm`**.
+3. In **Workbook data**, choose the refreshed **GradCAS** or **EngineeringCAS** `.xlsx`.
+4. Click **Update publication workbook**.
+
+The upload replaces the matching CAS source inside that publication and preserves the other source, the live slug, public display settings, and existing branding captures. Branding is matched by **CAS Program ID**; rerun branding capture only when the refreshed workbook introduces Program IDs that do not already have captures or when branding content changed in CAS.
+
+To edit what appears publicly, use the checkbox sections on the same admin page and click **Save changes**. For example, uncheck **Answer Display** or **Answer Value** under **Answers table (public columns)** to hide those fields on `/s/<slug>` without reuploading workbooks or branding.
+
+---
+
 ## Security
 
 - **`ADMIN_PASSWORD`** and **`AUTH_SECRET`** are sensitive; keep them in Vercel env only.

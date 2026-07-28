@@ -6,6 +6,7 @@ import type {
   RecommendationByOffering,
   TermFieldSetting,
 } from "./types";
+import { inferCasProfile, type CasProfile } from "./cas-profile";
 import { DEFAULT_PROGRAM_NAME_STRIP_SUFFIXES } from "./program-display";
 import { getRecordValueCi } from "./record-key";
 import { REDUNDANT_DETAIL_COLUMN_KEYS } from "./types";
@@ -575,6 +576,229 @@ function cloneGroup(g: CasProgramGroup): CasProgramGroup {
   return JSON.parse(JSON.stringify(g)) as CasProgramGroup;
 }
 
+function combineSourceFileNames(a: string, b: string): string {
+  return [a, b].map((s) => s.trim()).filter(Boolean).join(" + ");
+}
+
+function splitSourceFileName(label: string): string[] {
+  return label
+    .split(/\s+\+\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function sourceLabelProfile(label: string): CasProfile | null {
+  const profile = inferSourceProfileFromFileName(label);
+  return profile === "gradcas" || profile === "engineeringcas" ? profile : null;
+}
+
+function sourceFileNameWithoutProfiles(
+  sourceFileName: string,
+  profiles: Set<CasProfile>
+): string {
+  return splitSourceFileName(sourceFileName)
+    .filter((part) => {
+      const profile = sourceLabelProfile(part);
+      return !profile || !profiles.has(profile);
+    })
+    .join(" + ");
+}
+
+function sourceFileNameWithProfilesReplaced(
+  existingSourceFileName: string,
+  incomingSourceFileName: string,
+  profiles: Set<CasProfile>
+): string {
+  return combineSourceFileNames(
+    sourceFileNameWithoutProfiles(existingSourceFileName, profiles),
+    incomingSourceFileName
+  );
+}
+
+function offeringProfile(o: CasOffering, sourceFileName: string): CasProfile {
+  return inferCasProfile({
+    programId: o.programId,
+    sourceProfile: o.sourceProfile,
+    sourceFileName,
+  });
+}
+
+function rowProfile(
+  row: Record<string, string>,
+  sourceFileName: string,
+  profileByProgramId?: Map<string, CasProfile>
+): CasProfile | null {
+  const programId = cleanProgramId(getRecordValueCi(row, "Program ID") ?? "");
+  if (!programId) return null;
+  const mapped = profileByProgramId?.get(programId);
+  if (mapped) return mapped;
+  return inferCasProfile({ programId, sourceFileName });
+}
+
+function shouldReplaceOffering(
+  offering: CasOffering,
+  sourceFileName: string,
+  profiles: Set<CasProfile>
+): boolean {
+  return profiles.has(offeringProfile(offering, sourceFileName));
+}
+
+function shouldReplaceDetailRow(
+  row: Record<string, string>,
+  sourceFileName: string,
+  profiles: Set<CasProfile>,
+  profileByProgramId?: Map<string, CasProfile>
+): boolean {
+  const profile = rowProfile(row, sourceFileName, profileByProgramId);
+  return profile ? profiles.has(profile) : false;
+}
+
+function recommendationRowProfile(
+  row: RecommendationByOffering,
+  sourceFileName: string,
+  profileByProgramId?: Map<string, CasProfile>
+): CasProfile {
+  const programId = cleanProgramId(row.programId);
+  const mapped = profileByProgramId?.get(programId);
+  if (mapped) return mapped;
+  return inferCasProfile({ programId: row.programId, sourceFileName });
+}
+
+function attributeRowFromOffering(
+  groupShared: Record<string, string>,
+  offering: CasOffering
+): Record<string, string> {
+  const row: Record<string, string> = { ...groupShared, ...offering.varying };
+  for (const part of offering.termParts) {
+    row[part.key] = part.value;
+  }
+  return row;
+}
+
+function rebuildGroupSharedAndVarying(group: CasProgramGroup): CasProgramGroup {
+  const attrRows = group.offerings.map((o) => attributeRowFromOffering(group.shared, o));
+  if (attrRows.length === 0) return group;
+  const shared = computeShared(attrRows);
+  return {
+    ...group,
+    shared,
+    offerings: group.offerings.map((offering, index) => ({
+      ...offering,
+      varying: computeVarying(attrRows[index] ?? {}, shared),
+      termParts: [...offering.termParts],
+    })),
+  };
+}
+
+function rebuildRecommendationsAfterProfileRemoval(
+  group: CasProgramGroup,
+  recommendationRows: RecommendationByOffering[] | undefined
+): CasProgramGroup {
+  if (!group.recommendationRows) return group;
+  if (!recommendationRows?.length) {
+    const next = { ...group, recommendations: null };
+    delete next.recommendationRows;
+    delete next.recommendationNote;
+    delete next.recommendationPolicyDiffersByWindow;
+    return next;
+  }
+
+  const uniqueValues = new Set(recommendationRows.map((r) => JSON.stringify(r.values)));
+  const next: CasProgramGroup = {
+    ...group,
+    recommendations: { ...recommendationRows[0].values },
+  };
+  if (uniqueValues.size > 1) {
+    next.recommendationRows = recommendationRows;
+    next.recommendationNote =
+      group.recommendationNote ??
+      "Recommendation settings differ by application window; each window is listed below.";
+  } else {
+    delete next.recommendationRows;
+    delete next.recommendationNote;
+  }
+  if (recommendationPolicyDiffersAcrossRows(recommendationRows)) {
+    next.recommendationPolicyDiffersByWindow = true;
+  } else {
+    delete next.recommendationPolicyDiffersByWindow;
+  }
+  return next;
+}
+
+function removeProfilesFromGroup(
+  group: CasProgramGroup,
+  sourceFileName: string,
+  profiles: Set<CasProfile>
+): CasProgramGroup | null {
+  const profileByProgramId = new Map(
+    group.offerings
+      .map((o) => [cleanProgramId(o.programId), offeringProfile(o, sourceFileName)] as const)
+      .filter(([programId]) => Boolean(programId))
+  );
+  const offerings = group.offerings
+    .filter((o) => !shouldReplaceOffering(o, sourceFileName, profiles))
+    .map((o) => ({ ...o, varying: { ...o.varying }, termParts: [...o.termParts] }));
+  if (offerings.length === 0) return null;
+
+  const recommendationRows = group.recommendationRows
+    ?.filter((r) => !profiles.has(recommendationRowProfile(r, sourceFileName, profileByProgramId)))
+    .map((r) => ({
+      ...r,
+      values: { ...r.values },
+    }));
+
+  const next: CasProgramGroup = {
+    ...group,
+    shared: { ...group.shared },
+    offerings,
+    recommendations: group.recommendations ? { ...group.recommendations } : null,
+    questions: group.questions
+      .filter((r) => !shouldReplaceDetailRow(r, sourceFileName, profiles, profileByProgramId))
+      .map((r) => ({ ...r })),
+    documents: group.documents
+      .filter((r) => !shouldReplaceDetailRow(r, sourceFileName, profiles, profileByProgramId))
+      .map((r) => ({ ...r })),
+    answers: group.answers
+      .filter((r) => !shouldReplaceDetailRow(r, sourceFileName, profiles, profileByProgramId))
+      .map((r) => ({ ...r })),
+  };
+  return rebuildRecommendationsAfterProfileRemoval(
+    rebuildGroupSharedAndVarying(next),
+    recommendationRows
+  );
+}
+
+export function publicationDataProfiles(data: CasPublicationData): CasProfile[] {
+  const profiles = new Set<CasProfile>();
+  for (const group of data.groups) {
+    for (const offering of group.offerings) {
+      if (!cleanProgramId(offering.programId)) continue;
+      profiles.add(offeringProfile(offering, data.sourceFileName));
+    }
+  }
+  return [...profiles].sort();
+}
+
+function removeProfilesFromPublicationData(
+  data: CasPublicationData,
+  profiles: Set<CasProfile>
+): CasPublicationData {
+  const existingProfiles = publicationDataProfiles(data);
+  const replacingAllProfiles =
+    existingProfiles.length > 0 && existingProfiles.every((p) => profiles.has(p));
+  const groups = data.groups
+    .map((group) => removeProfilesFromGroup(group, data.sourceFileName, profiles))
+    .filter((group): group is CasProgramGroup => Boolean(group));
+
+  return recomputePublicationMetadata({
+    ...data,
+    sourceFileName: sourceFileNameWithoutProfiles(data.sourceFileName, profiles),
+    orgQuestions: replacingAllProfiles ? [] : data.orgQuestions.map((r) => ({ ...r })),
+    orgAnswers: replacingAllProfiles ? [] : data.orgAnswers.map((r) => ({ ...r })),
+    groups,
+  });
+}
+
 /**
  * Merges a second CAS export into the first (same schema). Groups match on `groupKey`;
  * offerings dedupe on Program ID; questions/documents/answers are unioned and deduped.
@@ -647,7 +871,7 @@ export function mergePublicationData(
   const mergedGroups = [...map.values()].sort((x, y) =>
     x.displayName.localeCompare(y.displayName, undefined, { sensitivity: "base" })
   );
-  const sourceFileName = `${a.sourceFileName} + ${b.sourceFileName}`;
+  const sourceFileName = combineSourceFileNames(a.sourceFileName, b.sourceFileName);
   const orgQuestions = dedupeOrgRows([...a.orgQuestions, ...b.orgQuestions]);
   const orgAnswers = dedupeOrgRows([...a.orgAnswers, ...b.orgAnswers]);
   const raw: CasPublicationData = {
@@ -661,6 +885,31 @@ export function mergePublicationData(
     documentColumnOptions: [],
   };
   return recomputePublicationMetadata(raw);
+}
+
+export function replacePublicationDataProfiles(
+  base: CasPublicationData,
+  incoming: CasPublicationData
+): { data: CasPublicationData; replacedProfiles: CasProfile[] } {
+  const profiles = publicationDataProfiles(incoming);
+  if (profiles.length === 0) {
+    return { data: mergePublicationData(base, incoming), replacedProfiles: [] };
+  }
+
+  const profileSet = new Set(profiles);
+  const pruned = removeProfilesFromPublicationData(base, profileSet);
+  const merged = mergePublicationData(pruned, incoming);
+  return {
+    data: {
+      ...merged,
+      sourceFileName: sourceFileNameWithProfilesReplaced(
+        base.sourceFileName,
+        incoming.sourceFileName,
+        profileSet
+      ),
+    },
+    replacedProfiles: profiles,
+  };
 }
 
 function buildGroupsFromSheets(params: {
@@ -803,7 +1052,6 @@ export function filterRecordRows(
   rows: Record<string, string>[],
   visibleKeys: string[]
 ): Record<string, string>[] {
-  if (visibleKeys.length === 0) return rows;
   return rows.map((r) => {
     const o: Record<string, string> = {};
     for (const k of visibleKeys) {
@@ -845,7 +1093,8 @@ export function mergeVisibleDetailKeys(
   defaults: string[]
 ): string[] {
   const opt = new Set(options);
-  const filtered = (previous ?? []).filter((k) => opt.has(k));
-  if (filtered.length > 0) return filtered;
+  if (previous !== undefined) {
+    return previous.filter((k) => opt.has(k));
+  }
   return defaults.filter((k) => opt.has(k));
 }

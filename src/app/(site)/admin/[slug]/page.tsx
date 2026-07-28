@@ -67,7 +67,7 @@ type BrandingAdminResponse = {
       okBrandingProgramCount?: number;
       missingProgramCount: number;
       missingProgramIds: string[];
-      status: "current" | "missing" | "stale" | "not_applicable";
+      status: "current" | "missing" | "not_applicable";
       hasMissingIds: boolean;
       dataNewerThanSnapshot: boolean;
       statusDetail: string;
@@ -425,7 +425,7 @@ export default function AdminPublicationPage() {
 
   async function mergeUpload() {
     if (!mergeFile) {
-      setMergeMessage("Choose a workbook to merge.");
+      setMergeMessage("Choose a workbook to update this publication.");
       return;
     }
     setMergeBusy(true);
@@ -458,10 +458,11 @@ export default function AdminPublicationPage() {
         body: JSON.stringify({
           pathname: blobResult.pathname,
           sourceFileName: mergeFile.name,
+          mode: "replace-source",
         }),
       });
       const rawMerge = await res.text();
-      let body: { error?: string; sourceFileName?: string } = {};
+      let body: { error?: string; sourceFileName?: string; mode?: string } = {};
       try {
         if (rawMerge.trim()) body = JSON.parse(rawMerge) as typeof body;
       } catch {
@@ -479,12 +480,13 @@ export default function AdminPublicationPage() {
       setMergeFile(null);
       setMergeMessage(
         body.sourceFileName
-          ? `Merged. Combined source label: ${body.sourceFileName}`
-          : "Merged successfully."
+          ? `Updated publication data. Source files now: ${body.sourceFileName}. Public display settings and existing branding captures were kept.`
+          : "Updated publication data. Public display settings and existing branding captures were kept."
       );
       await loadConfig();
+      await loadBranding();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unexpected error during merge");
+      setError(e instanceof Error ? e.message : "Unexpected error during workbook update");
     } finally {
       setMergeBusy(false);
     }
@@ -939,10 +941,10 @@ export default function AdminPublicationPage() {
             </h2>
             <p className="mt-2 text-sm text-wsu-gray">
               Export everything below (columns, term lines, public header/hero, program-name
-              suffixes, publication title) except the CAS workbook. After a{" "}
-              <strong className="text-wsu-gray-dark">new upload</strong> creates a new publication,
-              open its admin page and import the same JSON to reapply your layout — column keys that
-              do not exist in the new file are dropped automatically.
+              suffixes, publication title) except the CAS workbook. You usually do not need this
+              for a refreshed GradCAS or EngineeringCAS workbook on the same publication; use the
+              workbook update below to keep these settings in place. If you create a new publication
+              later, import this JSON there to reapply your layout.
             </p>
             <p className="mt-2 text-sm text-wsu-gray">
               <strong className="text-wsu-gray-dark">Where is the JSON?</strong> The app does not
@@ -1013,14 +1015,14 @@ export default function AdminPublicationPage() {
             </h2>
             <p className="mt-2 text-sm text-wsu-gray-dark">{saved.sourceFileName}</p>
             <p className="mt-3 text-sm text-wsu-gray">
-              Add another CAS export (for example GradCAS after EngineeringCAS). The app reads your
-              second file and combines it with what is already published — you keep separate
-              workbooks; nothing is pre-merged in Excel. Large files upload straight to Blob storage
-              so they are not limited by the small server request cap on Vercel.
+              Upload a refreshed GradCAS or EngineeringCAS export. The app replaces the matching
+              CAS source inside this publication and keeps the other source, public display
+              settings, live slug, and existing branding captures. Large files upload straight to
+              Blob storage so they are not limited by the small server request cap on Vercel.
             </p>
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
               <label className="block flex-1 text-sm font-medium text-wsu-gray-dark">
-                Second workbook (.xlsx)
+                CAS workbook update (.xlsx)
                 <input
                   type="file"
                   accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -1035,7 +1037,7 @@ export default function AdminPublicationPage() {
                 onClick={() => void mergeUpload()}
                 className="rounded-lg bg-wsu-gray-dark px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-wsu-gray disabled:opacity-50"
               >
-                {mergeBusy ? "Uploading and merging…" : "Add workbook to publication"}
+                {mergeBusy ? "Uploading and updating…" : "Update publication workbook"}
               </button>
             </div>
             {mergeMessage && (
@@ -1075,7 +1077,7 @@ export default function AdminPublicationPage() {
             <p className="mt-2 text-sm text-wsu-gray">
               Branding is joined to this publication by <strong className="text-wsu-gray-dark">Program ID</strong>.
               This page publishes the capture manifest; the local branding capture app reads that manifest,
-              opens your logged-in browser, captures stale/missing profiles, and uploads the latest snapshot.
+              opens your logged-in browser, captures missing profiles, and uploads the latest snapshot.
             </p>
             {branding ? (
               <>
@@ -1111,7 +1113,7 @@ export default function AdminPublicationPage() {
                   </p>
                   <p className="mt-1 text-sm text-wsu-gray">
                     Open the local app, load the latest publication manifest from Vercel, then run
-                    guided login and capture for any profile marked missing or stale. Capture uploads
+                    guided login and capture for any profile marked missing. Capture uploads
                     automatically; the public page uses the latest completed snapshot after refresh.
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -1153,11 +1155,9 @@ export default function AdminPublicationPage() {
                           className={`rounded-full px-2 py-0.5 font-semibold ${
                             profileRow.status === "current"
                               ? "bg-emerald-100 text-emerald-800"
-                              : profileRow.status === "stale"
-                                ? "bg-amber-100 text-amber-900"
-                                : profileRow.status === "missing"
-                                  ? "bg-red-100 text-red-800"
-                                  : "bg-wsu-gray/10 text-wsu-gray-dark"
+                              : profileRow.status === "missing"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-wsu-gray/10 text-wsu-gray-dark"
                           }`}
                         >
                           {profileRow.status.replace("_", " ")}
